@@ -3,7 +3,7 @@
  * because every path is relative to this worker's scope.
  * API calls go to the sidekick server (another origin on GitHub Pages) and
  * are never cached. */
-const CACHE = 'sidekick-v2';
+const CACHE = 'sidekick-v3';
 const SHELL = ['./', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png'];
 

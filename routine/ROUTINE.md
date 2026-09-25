@@ -35,6 +35,14 @@ ngrok-skip-browser-warning: true
 - If something fails, still call `/done` with `"failed": true` and a short
   reason so the phone shows it.
 
+## Model (hard rule)
+
+Replies must be written and judged by the latest Opus. Do **all drafting and all
+judging inside subagents launched with `model: "opus"`** (Agent tool), even if
+this session itself runs on another model. Never draft or judge with Sonnet or
+Haiku. If you can't launch an Opus subagent, stop and call `/done` with
+`"failed": true` and the reason, instead of drafting with a weaker model.
+
 ## Path mapping
 
 The guides were written for the Cowork workspace. In this repo every
@@ -93,7 +101,8 @@ their Singapore/career/products/family/revenue, age, location, relationships or
 personal history. Voice changes style and structure only.
 
 - Name the voice first in each draft's `angle`, e.g.
-  `Avery - R7 question - why`, `Arthur - direct answer - why`, `Abhiijay - R2 confession - why`.
+  `Avery · R7 question · <concrete reason>`, followed by the R-move and a real reason
+  tied to this post (see the voice quality rules below). Never the placeholder word "why".
   The Chrome extension shows `angle` as the draft's label on X, so this is what
   the user reads when picking.
 - The three drafts answer the **same** post with the same honest anchor. They differ
@@ -109,15 +118,50 @@ personal history. Voice changes style and structure only.
 For the other accounts (`k77builds`, `kshetezVinayak`, or empty), behaviour is
 unchanged: follow the writer guide's Step 0 account gate and its 2-3 drafts rule.
 
+### Voice quality rules (hard, every account)
+
+These come from reviewing a bad batch (2026-09-25): Beamcite in nearly every
+draft, invented stakes, the same question template over and over, and angles that
+just said "why". Each rule below prevents one of those.
+
+**Startup reads, every job, in full, before writing a single draft:**
+`REPLY-PLAYBOOK.md`, `REJECTED-DRAFTS.md`, `KSHETEZ-CORPUS.md` (under
+`projects/Beamcite/twitter-format-research/`), `learnings/LRN-anchor-bank.md`,
+`guides/human-voice-writing-guide.md` Parts 1 and 5, and every `voice_examples`
+entry from the job payload. For `abhiijayVinayak` also read
+`abhijay-x-identity/abhiijay-voice-guide.md`,
+`abhijay-x-identity/abhijay-x-personality-playbook.md` and the two approved
+batches `abhijay-x-identity/x-reply-drafts-2026-07-11.md` and
+`...-2026-07-11-batch2.md`. The user said of those: "keep writing them like this."
+Pick 5 approved lines that are closest to each post and imitate their **shape**.
+
+1. **Beamcite cap.** At most 1 in 5 drafts across the whole batch may mention
+   Beamcite (or SupaSidebar), at most once per item, and never as the punchline.
+   Most drafts mention no product at all. The profile sells, not the reply.
+2. **No invented stakes.** Every "we / i did X" line must trace to an entry in
+   `LRN-anchor-bank.md` or a `voice_examples` reply. Name the source in the angle.
+   No anchor means no confession: use a specific question or an observation instead.
+3. **Variety.** Questions are at most 40% of the batch. At most 1 draft per batch may use
+   the "how do you tell X from Y" template. No two items may open with the same
+   structure. Match Avery's short one-thought length for most drafts.
+4. **Real angles.** `angle` = `<Voice> · <R-move> · <one concrete reason tied to
+   this post>`, e.g. `Avery · R7 question · he skipped how he picks which gap to chase`.
+   Never write the literal word "why" as a placeholder.
+5. **Blocked authors.** Never draft for anyone in `blocked_authors` (the server
+   already filters these; double-check).
+6. **Opus judge.** A separate `model: "opus"` subagent scores every draft 1-10 on
+   "would he actually type this?", quoting any tell from REJECTED-DRAFTS. Anything below
+   8 gets rewritten or dropped. Put the lowest score in the job report.
+
 3. Write results (you may send them in several batches):
 
 ```
 POST {base_url}/agent/job/{job_id}/drafts
 {"items": [
   {"id": "<queue item id>",
-   "drafts": [{"text": "reply text", "angle": "Avery - R7 question - why"},
-              {"text": "reply text", "angle": "Arthur - direct answer - why"},
-              {"text": "reply text", "angle": "Abhiijay - R2 confession - why"}],
+   "drafts": [{"text": "reply text", "angle": "Avery · R7 question · <concrete reason for this post>"},
+              {"text": "reply text", "angle": "Arthur · direct answer · <concrete reason>"},
+              {"text": "reply text", "angle": "Abhiijay · R2 confession · anchor: <anchor-bank entry>"}],
    "avery_reference": {"example": "", "pattern": "", "template": "", "source_url": ""},
    "tweet_text": "full text if you fetched it",
    "agent_note": "verify-note, or why you skipped"}
@@ -137,11 +181,18 @@ The server already ran Stage 1 (watchlist OR-search via Armory, 24h window, max
 one post per author, never-reply list removed). Do not re-fetch the watchlist.
 
 1. `GET {base_url}/agent/job/{job_id}` returns `candidates`:
-   `{url, author, author_followers, text, age_hours, likes, replies, retweets, views}`.
+   `{url, author, author_followers, text, age_hours, likes, replies, retweets, views,
+   high_view_low_eng, view_gap}`. `high_view_low_eng: true` means lots of views
+   but few likes and replies so far (`view_gap` = views per engagement). A good reply
+   there is likely to be seen, so these are priority targets.
 2. Score them with `knowledge/guides/skill-x-reply-scout-guide.md`
    Step 3 (read the REPLY-PLAYBOOK first): freshness, low crowding, reply-section
    demand, lane fit (all lanes from the guide), reach, and whether an honest
    R-move exists. Drop anything with no honest R-move. Do not pad to 20.
+   - **Gap mix:** aim for roughly 40-50% of the shortlist to be `high_view_low_eng`
+     posts (best `view_gap` first) that have an honest R-move, and fill the rest with
+     the usual fresh, uncrowded, on-lane picks. Don't fill the whole list with gap posts.
+     Mention the gap in `reply_signal`, e.g. `12k views, 3 replies`.
    - You may inspect a few top candidates' comment sections with
      `/agent/armory/{job_id}/twitter/replies` and `{"tweet": "<url>", "max_items": 10}`.
      Each call costs Armory credits, so keep it to the strongest few.

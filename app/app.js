@@ -1,7 +1,7 @@
 /* X reply sidekick - Android PWA.
  * Talks only to the sidekick server (/api/*) with the app password.
- * SAFETY: never posts. "Copy + open" copies a draft and opens the post in the
- * X app; you paste and press Reply yourself.
+ * SAFETY: never posts. "Reply" copies a draft and opens the post in the X app;
+ * you paste and press Reply yourself.
  * All post text comes from X and is untrusted: it is only ever set via
  * textContent, never innerHTML.
  */
@@ -10,8 +10,8 @@ const LS = {
   get(k, d = '') { try { return localStorage.getItem('sk_' + k) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem('sk_' + k, v); } catch { /* private mode */ } },
 };
-
-const state = { items: [], outreach: [], jobs: [], scout: null, pollTimer: null };
+const ACTIVE = ['created', 'fired', 'working', 'fetching', 'scoring'];
+const state = { items: [], outreach: [], jobs: [], blocked: [], scout: null, seg: 'ready', filter: 'all', picked: new Set(), pollTimer: null };
 
 /* ---------------- api ---------------- */
 
@@ -28,7 +28,6 @@ async function api(path, body) {
       headers: {
         'Content-Type': 'application/json',
         'X-Sidekick-Key': LS.get('password'),
-        // ngrok free plan shows a browser warning page unless this is sent.
         'ngrok-skip-browser-warning': 'true',
       },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -39,7 +38,6 @@ async function api(path, body) {
     if (!res.ok) {
       const err = new Error(data.error || ('HTTP ' + res.status));
       err.status = res.status;
-      err.data = data;
       throw err;
     }
     return data;
@@ -51,7 +49,7 @@ async function api(path, body) {
   }
 }
 
-/* ---------------- ui helpers ---------------- */
+/* ---------------- helpers ---------------- */
 
 function el(tag, props = {}, ...kids) {
   const n = document.createElement(tag);
@@ -61,7 +59,7 @@ function el(tag, props = {}, ...kids) {
     else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
     else if (v !== undefined && v !== null && v !== false) n.setAttribute(k, v === true ? '' : v);
   }
-  for (const kid of kids) if (kid) n.append(kid);
+  for (const kid of kids) if (kid !== null && kid !== undefined && kid !== false) n.append(kid);
   return n;
 }
 
@@ -72,264 +70,258 @@ function toast(msg, isErr = false) {
   t.className = 'toast' + (isErr ? ' err' : '');
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 2800);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
 }
 
 function banner(msg, isErr = false) {
   const b = $('banner');
-  if (!msg) { b.hidden = true; return; }
-  b.textContent = msg;
-  b.className = 'banner' + (isErr ? ' err' : '');
-  b.hidden = false;
+  b.hidden = !msg;
+  if (msg) { b.textContent = msg; b.className = 'banner' + (isErr ? ' err' : ''); }
 }
 
 async function copy(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    // Fallback for browsers that block the async clipboard API.
-    const ta = el('textarea');
-    ta.value = text;
-    document.body.append(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    ta.remove();
-    return ok;
+  try { await navigator.clipboard.writeText(text); return true; } catch {
+    const ta = el('textarea'); ta.value = text; document.body.append(ta); ta.select();
+    const ok = document.execCommand('copy'); ta.remove(); return ok;
   }
 }
 
 function ago(ts) {
   if (!ts) return '';
-  const d = new Date(ts.replace(' ', 'T'));
-  const m = Math.round((Date.now() - d.getTime()) / 60000);
+  const m = Math.round((Date.now() - new Date(String(ts).replace(' ', 'T')).getTime()) / 60000);
   if (!isFinite(m)) return '';
-  if (m < 60) return m + 'm ago';
-  if (m < 1440) return Math.round(m / 60) + 'h ago';
-  return Math.round(m / 1440) + 'd ago';
+  if (m < 1) return 'now';
+  if (m < 60) return m + 'm';
+  if (m < 1440) return Math.round(m / 60) + 'h';
+  return Math.round(m / 1440) + 'd';
 }
 
+function agoText(ts) {
+  const a = ago(ts);
+  return a === 'now' ? 'just now' : a ? a + ' ago' : '';
+}
+
+function num(n) {
+  if (n === null || n === undefined) return '';
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+  return String(n);
+}
+
+function handleOf(x) { return String(x || '').replace(/^@/, ''); }
 function busy(btn, label) {
-  const prev = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = label;
+  const prev = btn.textContent; btn.disabled = true; btn.textContent = label;
   return () => { btn.disabled = false; btn.textContent = prev; };
 }
+function postText(it) { return it.tweet_text || it.title || it.text || ''; }
+function postUrl(it) { return it.tweet_url || it.url || ''; }
 
-/* ---------------- tabs ---------------- */
-
-function showTab(name) {
-  document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
-  document.querySelectorAll('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== name; });
-  $('scoutActions').hidden = name !== 'scout' || !hasScoutPicks();
-  LS.set('tab', name);
-  if (name === 'scout') loadScout();
-  if (name === 'settings') renderJobs();
+/* Action sheet (the ⋯ menu). */
+function sheet(title, actions) {
+  const body = $('sheetBody');
+  body.replaceChildren(el('div', { class: 'sheet-title', text: title }));
+  for (const a of actions) {
+    body.append(el('button', { class: a.danger ? 'danger' : '', text: a.label, onclick: () => { closeSheet(); a.run(); } }));
+  }
+  body.append(el('button', { text: 'Cancel', onclick: closeSheet }));
+  $('sheet').hidden = false;
 }
-document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+function closeSheet() { $('sheet').hidden = true; }
+$('sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') closeSheet(); });
 
-/* ---------------- load + render ---------------- */
+/* ---------------- navigation ---------------- */
+
+const TITLES = { replies: 'Replies', scout: 'Scout', outreach: 'Outreach', settings: 'Settings' };
+function showTab(name) {
+  document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
+  document.querySelectorAll('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== name; });
+  $('title').textContent = TITLES[name];
+  LS.set('tab', name);
+  updateActionbar();
+  if (name === 'scout') loadScout();
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+function currentTab() { return document.querySelector('.tabbar button.on').dataset.tab; }
+
+function showSeg(name) {
+  state.seg = name;
+  document.querySelectorAll('.seg button').forEach((b) => b.classList.toggle('on', b.dataset.seg === name));
+  document.querySelectorAll('[data-segpanel]').forEach((p) => { p.hidden = p.dataset.segpanel !== name; });
+}
+document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => showSeg(b.dataset.seg)));
+
+/* ---------------- load ---------------- */
 
 async function refresh() {
   const needsServer = !LS.get('server') && location.hostname.endsWith('github.io');
   if (!LS.get('password') || needsServer) {
-    banner('Set the server URL and app password in Settings first.');
+    banner('Add the server URL and password in Settings.');
+    $('dot').className = 'dot';
     showTab('settings');
     return;
   }
   try {
-    const [h, q, o, j] = await Promise.all([api('/api/health'), api('/api/queue'), api('/api/outreach'), api('/api/jobs')]);
+    const [h, q, o, j, b] = await Promise.all([api('/api/health'), api('/api/queue'), api('/api/outreach'), api('/api/jobs'), api('/api/blocklist').catch(() => ({ items: [] }))]);
     state.items = q.items || [];
     state.outreach = o.items || [];
     state.jobs = j.jobs || [];
-    $('counts').textContent = h.drafted + ' drafted · ' + h.queued + ' queued';
+    state.blocked = b.items || [];
+    $('dot').className = 'dot ok';
     const warn = [];
-    if (!h.routine) warn.push('Claude routine not configured on the server (drafting disabled)');
-    if (!h.armory) warn.push('Armory not configured (scout and tweet-text fetch disabled)');
-    banner(warn.join('. '));
+    if (!h.routine) warn.push('Claude routine is not connected, so drafting is off.');
+    if (!h.armory) warn.push('Armory is not connected, so scouting is off.');
+    banner(warn.join(' '));
     renderReplies();
     renderOutreach();
-    renderJobStrip();
-    renderJobs();
+    renderSettingsLists();
     schedulePoll();
   } catch (e) {
-    banner(e.status === 401 ? 'Wrong app password. Fix it in Settings.' : 'Server unreachable: ' + e.message, true);
+    $('dot').className = 'dot err';
+    banner(e.status === 401 ? 'Wrong password. Fix it in Settings.' : 'Server unreachable: ' + e.message, true);
   }
 }
 
 function activeJobs(kind) {
-  return state.jobs.filter((j) => (!kind || j.kind === kind)
-    && ['created', 'fired', 'working', 'fetching', 'scoring'].includes(j.status)
-    && j.expires * 1000 > Date.now());
+  return state.jobs.filter((j) => (!kind || j.kind === kind) && ACTIVE.includes(j.status) && j.expires * 1000 > Date.now());
 }
 
 function schedulePoll() {
   clearTimeout(state.pollTimer);
-  // Poll while Claude is working; otherwise stay quiet.
   if (activeJobs().length) state.pollTimer = setTimeout(async () => {
     await refresh();
-    if (!$('scoutList').closest('[data-panel]').hidden) loadScout();
+    if (currentTab() === 'scout') loadScout();
   }, 10000);
 }
 
-const STATUS_TEXT = {
-  created: 'starting', fetching: 'fetching posts', scoring: 'Claude is scoring',
-  fired: 'Claude session started', working: 'Claude is working', done: 'done', failed: 'failed',
-};
+/* ---------------- replies ---------------- */
 
-function jobLine(j) {
-  const line = el('div', {},
-    el('b', { text: j.kind === 'draft' ? 'Drafting' : 'Scout' }),
-    ' · ' + (STATUS_TEXT[j.status] || j.status) + (j.progress ? ' (' + j.progress + ')' : '') + ' · ' + ago(j.ts));
-  if (j.session_url) {
-    line.append(' · ', el('a', { href: j.session_url, target: '_blank', rel: 'noopener', text: 'open session' }));
-  }
-  if (j.error) line.append(el('div', { class: 'note', text: j.error }));
-  if (j.report) line.append(el('div', { class: 'muted', text: j.report }));
-  return line;
+function avatar(name) {
+  return el('div', { class: 'avatar', text: (handleOf(name)[0] || '?').toUpperCase() });
 }
 
-function renderJobStrip() {
-  const strip = $('jobStrip');
-  const recent = state.jobs.find((j) => j.kind === 'draft');
-  const show = recent && (activeJobs('draft').length || (Date.now() - new Date(recent.ts.replace(' ', 'T')).getTime() < 3 * 3600e3));
-  strip.hidden = !show;
-  strip.replaceChildren();
-  if (show) strip.append(jobLine(recent));
+function whoRow(author, sub, onMore) {
+  return el('div', { class: 'who' },
+    avatar(author),
+    el('div', { class: 'who-name' }, el('b', { text: author ? '@' + handleOf(author) : 'post' }), el('span', { text: sub })),
+    onMore ? el('button', { class: 'more-btn', 'aria-label': 'More', text: '⋯', onclick: onMore }) : null);
 }
 
-function renderJobs() {
-  const list = $('jobsList');
-  list.replaceChildren();
-  if (!state.jobs.length) { list.append(el('div', { class: 'empty', text: 'No runs yet.' })); return; }
-  for (const j of state.jobs.slice(0, 10)) list.append(el('div', { class: 'card small' }, jobLine(j)));
+function postBlock(text, cls = 'post') {
+  const p = el('div', { class: cls, text: text || 'Text not fetched yet. Claude will fetch it.' });
+  p.addEventListener('click', () => p.classList.toggle('open'));
+  return p;
 }
 
-function postText(it) {
-  return it.tweet_text || it.title || it.text || '';
+function itemMenu(it) {
+  const h = handleOf(it.author);
+  const actions = [];
+  if (postUrl(it)) actions.push({ label: 'Open post on X', run: () => window.open(postUrl(it), '_blank', 'noopener') });
+  if (it.status === 'queued') actions.push({ label: 'Draft just this one', run: () => askDraft([it.id]) });
+  if (it.status === 'queued' || it.status === 'drafted') actions.push({ label: 'Skip', run: () => setStatus(it, 'skipped') });
+  if (it.status === 'posted' || it.status === 'skipped') actions.push({ label: 'Move back to waiting', run: () => setStatus(it, 'queued') });
+  if (h) actions.push({ label: 'Block @' + h, danger: true, run: () => blockUser(h) });
+  sheet(h ? '@' + h : 'Post', actions);
 }
 
-function postUrl(it) {
-  return it.tweet_url || it.url || '';
-}
-
-function textBlock(text) {
-  const box = el('div', { class: 'post-text', text: text || '(text not fetched yet - Claude will fetch it)' });
-  const wrap = el('div', {}, box);
-  if ((text || '').length > 280) {
-    const more = el('button', { class: 'more', text: 'show more', onclick: () => {
-      box.classList.toggle('open');
-      more.textContent = box.classList.contains('open') ? 'show less' : 'show more';
-    } });
-    wrap.append(more);
-  }
-  return wrap;
-}
-
-function itemHead(it) {
-  const url = postUrl(it);
-  return el('div', { class: 'item-head' },
-    el('span', { text: (it.author || it.platform || 'post') + (it.author_followers ? ' · ' + it.author_followers + ' followers' : '') }),
-    url ? el('a', { href: url, target: '_blank', rel: 'noopener', text: ago(it.ts) + ' ↗' }) : el('span', { text: ago(it.ts) }));
-}
-
-function renderReplies() {
-  const drafted = state.items.filter((i) => i.status === 'drafted');
-  const queued = state.items.filter((i) => i.status === 'queued');
-  const done = state.items.filter((i) => i.status === 'posted' || i.status === 'skipped').slice(0, 30);
-
-  $('draftedCount').textContent = drafted.length ? '(' + drafted.length + ')' : '';
-  $('queuedCount').textContent = queued.length ? '(' + queued.length + ')' : '';
-  $('draftAllBtn').disabled = !queued.length || activeJobs('draft').length > 0;
-
-  const dl = $('draftedList');
-  dl.replaceChildren();
-  if (!drafted.length) dl.append(el('div', { class: 'empty', text: 'No drafts ready.' }));
-  for (const it of drafted) dl.append(draftCard(it));
-
-  const ql = $('queuedList');
-  ql.replaceChildren();
-  if (!queued.length) ql.append(el('div', { class: 'empty', text: 'Nothing queued. Share a post from the X app to add one.' }));
-  for (const it of queued) {
-    const card = el('div', { class: 'card' }, itemHead(it), textBlock(postText(it)));
-    if (it.note) card.append(el('div', { class: 'note', text: 'note: ' + it.note }));
-    if (it.agent_note) card.append(el('div', { class: 'note', text: 'Claude: ' + it.agent_note }));
-    if (it.drafting_job) card.append(el('div', { class: 'small muted', text: 'Claude is drafting this…' }));
-    card.append(el('div', { class: 'row' },
-      el('button', { class: 'small-btn', text: 'draft just this', onclick: (e) => askDraft([it.id], e.target) }),
-      el('button', { class: 'ghost small-btn', text: 'skip', onclick: () => setStatus(it, 'skipped') })));
-    ql.append(card);
-  }
-
-  const dn = $('doneList');
-  dn.replaceChildren();
-  if (!done.length) dn.append(el('div', { class: 'empty', text: 'Nothing yet.' }));
-  for (const it of done) {
-    dn.append(el('div', { class: 'card small' }, itemHead(it),
-      el('div', { class: 'muted', text: it.status + (it.posted_text ? ': ' + it.posted_text : '') }),
-      el('div', { class: 'row' }, el('button', { class: 'ghost small-btn', text: 're-queue', onclick: () => setStatus(it, 'queued') }))));
-  }
+function voiceLabel(angle) {
+  const first = String(angle || '').split(/\s[·\-–|]\s/)[0].trim();
+  return first && first.length <= 24 ? first : 'Draft';
 }
 
 function draftCard(it) {
-  const card = el('div', { class: 'card' }, itemHead(it), textBlock(postText(it)));
-  if (it.note) card.append(el('div', { class: 'note', text: 'note: ' + it.note }));
-  if (it.agent_note) card.append(el('div', { class: 'note', text: 'Claude: ' + it.agent_note }));
+  const card = el('div', { class: 'card' },
+    whoRow(it.author, ago(it.ts) + (it.author_followers ? ' · ' + num(it.author_followers) + ' followers' : ''), () => itemMenu(it)),
+    postBlock(postText(it)));
+  if (it.agent_note) card.append(el('div', { class: 'flag' }, el('b', { text: '!' }), el('span', { text: it.agent_note })));
 
-  const posted = el('textarea', { rows: 2, placeholder: 'the reply you actually posted (your edits feed voice learning)' });
-  if (it.posted_text) { posted.value = it.posted_text; posted.dataset.dirty = '1'; }
-  posted.addEventListener('input', () => { posted.dataset.dirty = '1'; });
   let chosen = typeof it.chosen_index === 'number' ? it.chosen_index : null;
+  const sent = el('textarea', { rows: 2, placeholder: 'What you actually sent (teaches Claude your voice)' });
+  if (it.posted_text) { sent.value = it.posted_text; sent.dataset.dirty = '1'; }
+  sent.addEventListener('input', () => { sent.dataset.dirty = '1'; });
+  const sentWrap = el('div', { class: 'sent-edit' }, sent);
+  sentWrap.hidden = !it.posted_text;
 
+  const drafts = el('div', { class: 'drafts' });
   (it.drafts || []).forEach((d, idx) => {
+    const angle = el('div', { class: 'angle', text: d.angle || '' });
+    angle.hidden = true;
     const box = el('div', { class: 'draft' + (chosen === idx ? ' chosen' : '') },
-      el('div', { class: 'draft-text', text: d.text }),
-      d.angle ? el('div', { class: 'draft-angle', text: d.angle }) : null);
+      el('div', { class: 'draft-text', text: d.text }));
     const pick = () => {
       chosen = idx;
-      card.querySelectorAll('.draft').forEach((n, k) => n.classList.toggle('chosen', k === idx));
-      if (!posted.dataset.dirty) posted.value = d.text;
+      drafts.querySelectorAll('.draft').forEach((n, k) => n.classList.toggle('chosen', k === idx));
+      if (!sent.dataset.dirty) sent.value = d.text;
     };
-    const tid = it.tweet_id || ((postUrl(it).match(/status\/(\d+)/) || [])[1]);
-    box.append(el('div', { class: 'row' },
-      el('button', { class: 'primary small-btn', text: 'copy + open', onclick: async () => {
+    box.append(el('div', { class: 'draft-foot' },
+      el('button', { class: 'voice', text: voiceLabel(d.angle), title: 'Why this reply', onclick: () => { angle.hidden = !angle.hidden; } }),
+      el('span', { class: 'spacer' }),
+      el('button', { class: 'btn sm', text: 'Copy', onclick: async () => { pick(); toast((await copy(d.text)) ? 'Copied' : 'Copy failed', false); } }),
+      el('button', { class: 'btn sm primary', text: 'Reply', onclick: async () => {
         pick();
         const ok = await copy(d.text);
-        toast(ok ? 'Copied. Paste it in the reply box on X.' : 'Copy failed - long-press the text instead', !ok);
+        toast(ok ? 'Copied. Paste it on X.' : 'Copy failed. Long-press the text.', !ok);
         if (postUrl(it)) window.open(postUrl(it), '_blank', 'noopener');
-      } }),
-      el('button', { class: 'small-btn', text: 'copy', onclick: async () => {
-        pick();
-        const ok = await copy(d.text);
-        toast(ok ? 'Copied' : 'Copy failed', !ok);
-      } }),
-      tid ? el('button', { class: 'ghost small-btn', text: 'reply link', title: 'X reply intent with the text pre-filled (may ask you to log in inside the X app)', onclick: () => {
-        pick();
-        window.open('https://x.com/intent/post?in_reply_to=' + tid + '&text=' + encodeURIComponent(d.text), '_blank', 'noopener');
-      } }) : null));
-    card.append(box);
+      } })), angle);
+    drafts.append(box);
   });
+  card.append(drafts);
 
-  const ar = it.avery_reference;
-  if (ar && (ar.example || ar.pattern)) {
-    card.append(el('div', { class: 'avery' },
-      el('div', {}, el('b', { text: 'Avery reference: ' }), ar.example || ''),
-      ar.pattern ? el('div', { text: 'pattern: ' + ar.pattern }) : null,
-      ar.template ? el('div', { text: 'shape: ' + ar.template }) : null));
+  card.append(sentWrap, el('div', { class: 'card-foot' },
+    el('button', { class: 'btn primary', text: 'Posted', onclick: (e) => {
+      const text = sent.value || (chosen !== null ? it.drafts[chosen].text : '');
+      finish(it, 'posted', text, chosen, e.target);
+    } }),
+    el('button', { class: 'btn', text: sentWrap.hidden ? 'Edit sent text' : 'Save text', onclick: async (e) => {
+      if (sentWrap.hidden) { sentWrap.hidden = false; e.target.textContent = 'Save text'; sent.focus(); return; }
+      try { await api('/api/queue/update', { id: it.id, posted_text: sent.value }); toast('Saved'); } catch (err) { toast(err.message, true); }
+    } })));
+  return card;
+}
+
+function waitingCard(it) {
+  const card = el('div', { class: 'card' },
+    whoRow(it.author, it.drafting_job ? 'Claude is drafting…' : ago(it.ts), () => itemMenu(it)),
+    postBlock(postText(it), 'post short'));
+  if (it.agent_note) card.append(el('div', { class: 'flag' }, el('b', { text: '!' }), el('span', { text: it.agent_note })));
+  return card;
+}
+
+function doneRow(it) {
+  return el('div', { class: 'row-card' }, avatar(it.author),
+    el('div', { class: 'grow' },
+      el('b', { text: '@' + handleOf(it.author) + ' · ' + it.status }),
+      el('div', { class: 'line', text: it.posted_text || postText(it) })),
+    el('button', { class: 'more-btn', text: '⋯', onclick: () => itemMenu(it) }));
+}
+
+function renderReplies() {
+  const ready = state.items.filter((i) => i.status === 'drafted');
+  const waiting = state.items.filter((i) => i.status === 'queued');
+  const done = state.items.filter((i) => i.status === 'posted' || i.status === 'skipped').slice(0, 40);
+  $('readyCount').textContent = ready.length || '';
+  $('waitingCount').textContent = waiting.length || '';
+  $('navBadge').textContent = ready.length || '';
+  $('draftAllBtn').disabled = !waiting.length || activeJobs('draft').length > 0;
+  $('draftAllBtn').textContent = waiting.length ? 'Draft all ' + waiting.length + ' with Claude' : 'Nothing waiting';
+
+  const job = activeJobs('draft')[0] || state.jobs.find((j) => j.kind === 'draft' && j.status === 'failed' && Date.now() - new Date(j.ts.replace(' ', 'T')).getTime() < 3600e3);
+  const pill = $('jobPill');
+  pill.hidden = !job;
+  pill.replaceChildren();
+  if (job) {
+    if (ACTIVE.includes(job.status)) pill.append(el('span', { class: 'spin' }), 'Claude is drafting…');
+    else pill.append('Drafting failed: ' + (job.error || 'see session'));
+    if (job.session_url) pill.append(el('a', { href: job.session_url, target: '_blank', rel: 'noopener', text: 'Watch' }));
   }
 
-  card.append(el('div', { class: 'posted-wrap' },
-    el('div', { class: 'label', text: 'final reply you posted' }), posted,
-    el('div', { class: 'row' },
-      el('button', { class: 'ok small-btn', text: 'mark posted', onclick: (e) => finish(it, 'posted', posted.value, chosen, e.target) }),
-      el('button', { class: 'small-btn', text: 'save text', onclick: async (e) => {
-        const done = busy(e.target, 'saving…');
-        try { await api('/api/queue/update', { id: it.id, posted_text: posted.value }); toast('Saved'); }
-        catch (err) { toast('Save failed: ' + err.message, true); }
-        finally { done(); }
-      } }),
-      el('button', { class: 'ghost small-btn', text: 'skip', onclick: (e) => finish(it, 'skipped', null, null, e.target) }))));
-  return card;
+  const fill = (id, list, fn, emptyText) => {
+    const box = $(id);
+    box.replaceChildren(...(list.length ? list.map(fn) : [el('div', { class: 'empty', text: emptyText })]));
+  };
+  fill('readyList', ready, draftCard, job && ACTIVE.includes(job.status) ? 'Drafts will show up here in a few minutes.' : 'No drafts yet. Share a post from X, or run Scout.');
+  fill('waitingList', waiting, waitingCard, 'Nothing waiting.');
+  fill('doneList', done, doneRow, 'Nothing here yet.');
 }
 
 async function finish(it, status, postedText, chosen, btn) {
@@ -339,49 +331,51 @@ async function finish(it, status, postedText, chosen, btn) {
     if (typeof postedText === 'string') body.posted_text = postedText;
     if (typeof chosen === 'number') body.chosen_index = chosen;
     await api('/api/queue/update', body);
-    toast(status === 'posted' ? 'Marked posted' : 'Skipped');
+    toast(status === 'posted' ? 'Nice. Marked posted.' : 'Skipped');
     await refresh();
-  } catch (e) {
-    toast('Failed: ' + e.message, true);
-    done();
-  }
+  } catch (e) { toast(e.message, true); done(); }
 }
 
 async function setStatus(it, status) {
+  try { await api('/api/queue/update', { id: it.id, status }); await refresh(); } catch (e) { toast(e.message, true); }
+}
+
+async function blockUser(handle) {
   try {
-    await api('/api/queue/update', { id: it.id, status });
+    const r = await api('/api/block', { handle });
+    toast('Blocked @' + handle + (r.skipped ? ' · removed ' + r.skipped : ''));
     await refresh();
-  } catch (e) { toast('Failed: ' + e.message, true); }
+    if (currentTab() === 'scout') renderScout();
+  } catch (e) { toast(e.message, true); }
 }
 
 async function askDraft(ids, btn) {
-  const done = btn ? busy(btn, 'asking Claude…') : () => {};
+  const done = btn ? busy(btn, 'Asking Claude…') : () => {};
   try {
-    const r = await api('/api/draft', { ids, account: LS.get('account') });
+    const r = await api('/api/draft', { ids, account: LS.get('account', 'abhiijayVinayak') });
     if (r.job && r.job.status === 'failed') toast(r.job.error || 'Claude run failed', true);
-    else toast('Claude is drafting. This takes a few minutes.');
-  } catch (e) { toast('Could not start Claude: ' + e.message, true); }
+    else toast('Claude is drafting. Takes a few minutes.');
+    showSeg('ready');
+  } catch (e) { toast(e.message, true); }
   done();
   await refresh();
 }
 
 $('draftAllBtn').addEventListener('click', (e) => askDraft(null, e.target));
 $('clearDoneBtn').addEventListener('click', async () => {
-  try { const r = await api('/api/queue/clear-done', {}); toast('Removed ' + r.removed); refresh(); }
-  catch (e) { toast(e.message, true); }
+  try { const r = await api('/api/queue/clear-done', {}); toast('Removed ' + r.removed); refresh(); } catch (e) { toast(e.message, true); }
 });
 
 /* ---------------- add / share ---------------- */
 
 async function addLink(url, note, draft) {
   const r = await api('/api/share', { url, note });
-  let msg;
-  if (r.kind === 'outreach') msg = r.duplicate ? '@' + r.handle + ' already in outreach' : 'Added @' + r.handle + ' to outreach';
-  else msg = r.duplicate ? 'Already in the queue' : 'Queued for reply';
-  if (r.warning) msg += ' (' + r.warning + ')';
+  let msg = r.kind === 'outreach'
+    ? (r.duplicate ? '@' + r.handle + ' is already in outreach' : 'Added @' + r.handle + ' to outreach')
+    : (r.duplicate ? 'Already queued' : 'Queued');
   if (draft && r.kind === 'reply' && r.id) {
-    const d = await api('/api/draft', { ids: [r.id], account: LS.get('account') });
-    msg += d.job && d.job.status === 'failed' ? ' - Claude failed: ' + d.job.error : ' - Claude is drafting';
+    const d = await api('/api/draft', { ids: [r.id], account: LS.get('account', 'abhiijayVinayak') });
+    msg += d.job && d.job.status === 'failed' ? '. Claude failed: ' + d.job.error : '. Claude is drafting.';
   }
   return msg;
 }
@@ -390,167 +384,211 @@ $('addBtn').addEventListener('click', async (e) => {
   const url = $('addUrl').value.trim();
   if (!url) return;
   const done = busy(e.target, '…');
-  try { toast(await addLink(url, '', false)); $('addUrl').value = ''; await refresh(); }
-  catch (err) { toast(err.message, true); }
-  finally { done(); }
+  try { toast(await addLink(url, '', false)); $('addUrl').value = ''; await refresh(); } catch (err) { toast(err.message, true); }
+  done();
 });
 
 function handleShareLaunch() {
   const p = new URLSearchParams(location.search);
-  // Android share target opens this page with title/text/url params
-  // (older server-hosted installs used /app/share?...).
   if (!p.has('text') && !p.has('url') && !p.has('title') && !location.pathname.includes('/share')) return;
-  // X's share puts the link in `text` (sometimes with extra words), not `url`.
   const raw = [p.get('url'), p.get('text'), p.get('title')].filter(Boolean).join(' ');
   const m = raw.match(/https?:\/\/\S+/);
   const url = m ? m[0] : '';
   history.replaceState(null, '', location.pathname.replace(/share\/?$/, ''));
-  const sheet = $('shareSheet');
-  sheet.hidden = false;
-  $('shareUrl').textContent = url || raw || '(nothing shared)';
   const isProfile = url && !/\/status\//.test(url);
-  $('shareQueue').textContent = isProfile ? 'Add to outreach' : 'Queue for reply';
+  $('shareSheet').hidden = false;
+  $('shareUrl').textContent = url || raw || '(nothing shared)';
   $('shareQueueDraft').hidden = !!isProfile;
+  $('shareQueue').textContent = isProfile ? 'Add to outreach' : 'Just add';
   const go = async (draft, btn) => {
     const done = busy(btn, '…');
     try {
       $('shareResult').textContent = await addLink(url, $('shareNote').value.trim(), draft);
-      setTimeout(() => { sheet.hidden = true; }, 1800);
+      setTimeout(() => { $('shareSheet').hidden = true; }, 1600);
       await refresh();
-    } catch (e) { $('shareResult').textContent = 'Failed: ' + e.message; }
-    finally { done(); }
+    } catch (e) { $('shareResult').textContent = e.message; }
+    done();
   };
   $('shareQueue').onclick = (e) => go(false, e.target);
   $('shareQueueDraft').onclick = (e) => go(true, e.target);
-  $('shareCancel').onclick = () => { sheet.hidden = true; };
+  $('shareCancel').onclick = () => { $('shareSheet').hidden = true; };
 }
 
 /* ---------------- scout ---------------- */
 
-function hasScoutPicks() {
-  return document.querySelectorAll('#scoutList input[type=checkbox]:checked').length > 0;
+function scoutRows() {
+  const run = state.scout && state.scout.run;
+  if (!run) return [];
+  const blocked = new Set(state.blocked.map((b) => handleOf(b.handle).toLowerCase()));
+  const rows = (run.shortlist && run.shortlist.length ? run.shortlist : run.candidates || [])
+    .filter((c) => !blocked.has(handleOf(c.author).toLowerCase()));
+  return rows;
 }
 
 async function loadScout() {
   try {
-    const r = await api('/api/scout');
-    state.scout = r;
+    state.scout = await api('/api/scout');
     renderScout();
-    if (r.job && ['created', 'fetching', 'scoring', 'fired', 'working'].includes(r.job.status)) {
-      clearTimeout(state.scoutTimer);
-      state.scoutTimer = setTimeout(loadScout, 10000);
-    }
+    const j = state.scout.job;
+    clearTimeout(state.scoutTimer);
+    if (j && ACTIVE.includes(j.status)) state.scoutTimer = setTimeout(loadScout, 10000);
   } catch (e) { $('scoutStatus').textContent = e.message; }
 }
 
+const SCOUT_STATUS = { created: 'Starting…', fetching: 'Fetching posts', scoring: 'Claude is scoring', fired: 'Claude is scoring', working: 'Claude is scoring', done: 'Done', failed: 'Failed' };
+
 function renderScout() {
   const { run, job } = state.scout || {};
-  const status = $('scoutStatus');
-  status.replaceChildren();
-  if (job) status.append(jobLine(job));
-  if (run && run.credits_remaining != null) status.append(el('div', { class: 'muted', text: 'Armory credits left: ' + run.credits_remaining }));
-  if (run && run.errors && run.errors.length) status.append(el('div', { class: 'note', text: run.errors.join(' | ') }));
-  const running = job && ['created', 'fetching', 'scoring', 'fired', 'working'].includes(job.status);
+  const running = job && ACTIVE.includes(job.status);
   $('scoutBtn').disabled = !!running;
+  $('scoutBtn').textContent = running ? 'Running…' : 'Run scout';
+  const bits = [];
+  if (job) bits.push((SCOUT_STATUS[job.status] || job.status) + (job.progress && running ? ' · ' + job.progress : '') + ' · ' + agoText(job.ts));
+  if (run && run.credits_remaining != null) bits.push(num(run.credits_remaining) + ' credits left');
+  $('scoutStatus').textContent = job && job.error ? 'Failed: ' + job.error : bits.join(' · ');
 
-  const rep = $('scoutReport');
-  rep.hidden = !(run && run.report);
-  rep.textContent = run && run.report ? run.report : '';
+  const all = scoutRows();
+  const gapCount = all.filter((c) => c.high_view_low_eng).length;
+  $('fAll').textContent = all.length || '';
+  $('fGap').textContent = gapCount || '';
+  $('scoutToolbar').hidden = !all.length;
+  const rows = state.filter === 'gap' ? all.filter((c) => c.high_view_low_eng) : all;
+  const live = new Set(all.map((c) => c.url));
+  for (const u of [...state.picked]) if (!live.has(u)) state.picked.delete(u);
 
   const list = $('scoutList');
-  const checked = new Set([...list.querySelectorAll('input:checked')].map((c) => c.value));
-  list.replaceChildren();
-  if (!run) { list.append(el('div', { class: 'empty', text: 'No scout run yet.' })); return; }
-  const rows = run.shortlist && run.shortlist.length ? run.shortlist : run.candidates || [];
-  if (run.shortlist && run.shortlist.length) list.append(el('h2', { text: 'Shortlist (' + rows.length + ')' }));
-  else if (rows.length) list.append(el('h2', { text: 'Raw candidates (' + rows.length + ')', class: '' }),
-    el('div', { class: 'small muted', text: running ? 'Claude has not scored these yet.' : 'Not scored by Claude.' }));
-  for (const c of rows) {
-    const cb = el('input', { type: 'checkbox', value: c.url });
-    cb.checked = checked.has(c.url);
-    cb.addEventListener('change', () => { $('scoutActions').hidden = !hasScoutPicks(); });
-    const body = el('div', { class: 'scout-body' },
-      el('div', { class: 'item-head' },
-        el('span', { text: '@' + String(c.author).replace(/^@/, '') + (c.author_followers ? ' · ' + c.author_followers : '') }),
-        el('a', { href: c.url, target: '_blank', rel: 'noopener', text: c.age_hours + 'h ↗' })),
-      el('div', { class: 'metrics', text: [c.replies != null ? c.replies + ' replies' : '', c.likes != null ? c.likes + ' likes' : '', c.views != null ? c.views + ' views' : '', c.score != null ? 'score ' + c.score : ''].filter(Boolean).join(' · ') }),
-      c.summary ? el('div', { class: 'small', text: c.summary }) : null,
-      textBlock(c.text),
-      c.suggested_move ? el('span', { class: 'move', text: c.suggested_move }) : null,
-      c.why ? el('div', { class: 'small muted', text: c.why }) : null,
-      c.reply_signal ? el('div', { class: 'small muted', text: 'signal: ' + c.reply_signal }) : null);
-    list.append(el('label', { class: 'card scout-item' }, cb, body));
-  }
-  $('scoutActions').hidden = !hasScoutPicks();
+  if (!run) { list.replaceChildren(el('div', { class: 'empty', text: 'Run the scout to find posts worth replying to.' })); updateActionbar(); return; }
+  if (!rows.length) { list.replaceChildren(el('div', { class: 'empty', text: running ? 'Looking for posts…' : 'Nothing found in the last 24h.' })); updateActionbar(); return; }
+  list.replaceChildren(...rows.map(scoutCard));
+  const allOn = rows.every((c) => state.picked.has(c.url));
+  $('selectAll').textContent = allOn ? 'Clear' : 'Select all';
+  updateActionbar();
 }
 
+function scoutCard(c) {
+  const card = el('div', { class: 'card scout-card' + (state.picked.has(c.url) ? ' sel' : '') });
+  const stats = el('div', { class: 'stats' });
+  if (c.high_view_low_eng) stats.append(el('span', { class: 'stat gap', text: 'High views, low engagement' }));
+  if (c.views != null) stats.append(el('span', { class: 'stat', text: num(c.views) + ' views' }));
+  if (c.replies != null) stats.append(el('span', { class: 'stat', text: num(c.replies) + ' replies' }));
+  if (c.likes != null) stats.append(el('span', { class: 'stat', text: num(c.likes) + ' likes' }));
+  if (c.suggested_move) stats.append(el('span', { class: 'stat move', text: c.suggested_move }));
+  const body = el('div', { class: 'scout-body' },
+    whoRow(c.author, c.age_hours + 'h' + (c.author_followers ? ' · ' + num(c.author_followers) + ' followers' : ''), (e) => {
+      e.stopPropagation();
+      const h = handleOf(c.author);
+      sheet('@' + h, [
+        { label: 'Open post on X', run: () => window.open(c.url, '_blank', 'noopener') },
+        { label: 'Block @' + h, danger: true, run: () => blockUser(h) },
+      ]);
+    }),
+    c.summary ? el('div', { class: 'summary', text: c.summary }) : null,
+    postBlock(c.text, 'post short'),
+    stats);
+  card.append(el('div', { class: 'check', text: '✓' }), body);
+  card.addEventListener('click', (e) => {
+    if (e.target.closest('.more-btn')) return;
+    if (e.target.closest('.post')) return; // tapping text expands it
+    state.picked.has(c.url) ? state.picked.delete(c.url) : state.picked.add(c.url);
+    card.classList.toggle('sel', state.picked.has(c.url));
+    updateActionbar();
+  });
+  return card;
+}
+
+function updateActionbar() {
+  const n = state.picked.size;
+  $('scoutActions').hidden = currentTab() !== 'scout' || !n;
+  $('scoutPickDraft').textContent = 'Draft ' + n + ' selected';
+  const rows = state.filter === 'gap' ? scoutRows().filter((c) => c.high_view_low_eng) : scoutRows();
+  $('selectAll').textContent = rows.length && rows.every((c) => state.picked.has(c.url)) ? 'Clear' : 'Select all';
+}
+
+$('selectAll').addEventListener('click', () => {
+  const rows = state.filter === 'gap' ? scoutRows().filter((c) => c.high_view_low_eng) : scoutRows();
+  const allOn = rows.every((c) => state.picked.has(c.url));
+  rows.forEach((c) => (allOn ? state.picked.delete(c.url) : state.picked.add(c.url)));
+  renderScout();
+});
+
+document.querySelectorAll('.chip[data-filter]').forEach((b) => b.addEventListener('click', () => {
+  state.filter = b.dataset.filter;
+  document.querySelectorAll('.chip[data-filter]').forEach((x) => x.classList.toggle('on', x === b));
+  renderScout();
+}));
+
 $('scoutBtn').addEventListener('click', async (e) => {
-  const done = busy(e.target, 'starting…');
-  try { await api('/api/scout', {}); toast('Scout started'); }
-  catch (err) { toast(err.message, true); }
+  const done = busy(e.target, 'Starting…');
+  try { await api('/api/scout', {}); toast('Scout started'); } catch (err) { toast(err.message, true); }
   done();
   loadScout();
 });
 
 async function pickScout(draft, btn) {
-  const urls = [...document.querySelectorAll('#scoutList input:checked')].map((c) => c.value);
+  const urls = [...state.picked];
   if (!urls.length) return;
   const done = busy(btn, '…');
   try {
-    const r = await api('/api/scout/pick', { run_id: state.scout.run.id, urls, draft, account: LS.get('account') });
-    let msg = 'Queued ' + r.added + ' new';
-    if (draft) msg += r.draft_error ? ' - draft failed: ' + r.draft_error : ' - Claude is drafting';
-    toast(msg, !!r.draft_error);
-    document.querySelectorAll('#scoutList input:checked').forEach((c) => { c.checked = false; });
-    $('scoutActions').hidden = true;
+    const r = await api('/api/scout/pick', { run_id: state.scout.run.id, urls, draft, account: LS.get('account', 'abhiijayVinayak') });
+    toast(draft ? (r.draft_error ? 'Queued, but drafting failed: ' + r.draft_error : 'Claude is drafting ' + urls.length) : 'Queued ' + r.added, !!r.draft_error);
+    state.picked.clear();
     await refresh();
+    renderScout();
+    if (draft && !r.draft_error) { showTab('replies'); showSeg('ready'); }
   } catch (e) { toast(e.message, true); }
-  finally { done(); }
+  done();
 }
 $('scoutPickDraft').addEventListener('click', (e) => pickScout(true, e.target));
 $('scoutPick').addEventListener('click', (e) => pickScout(false, e.target));
 
-/* ---------------- outreach ---------------- */
+/* ---------------- outreach + settings ---------------- */
 
 function renderOutreach() {
-  const list = $('outreachList');
-  list.replaceChildren();
   const rows = state.outreach.filter((o) => o.status === 'queued');
-  if (!rows.length) { list.append(el('div', { class: 'empty', text: 'No profiles queued.' })); return; }
-  for (const o of rows) {
-    list.append(el('div', { class: 'card small' },
-      el('div', { class: 'item-head' },
-        el('b', { text: '@' + o.handle + (o.display_name ? ' · ' + o.display_name : '') }),
-        el('a', { href: o.profile_url, target: '_blank', rel: 'noopener', text: ago(o.ts) + ' ↗' })),
-      o.bio ? el('div', { text: o.bio }) : null,
-      el('div', { class: 'muted', text: [o.followers_text, o.source].filter(Boolean).join(' · ') })));
-  }
+  $('outreachList').replaceChildren(...(rows.length ? rows.map((o) => el('div', { class: 'row-card' }, avatar(o.handle),
+    el('div', { class: 'grow' },
+      el('b', { text: '@' + o.handle }),
+      el('div', { class: 'line', text: o.bio || o.display_name || o.followers_text || '' })),
+    el('a', { class: 'link', href: o.profile_url, target: '_blank', rel: 'noopener', text: 'Open' })))
+    : [el('div', { class: 'empty', text: 'No profiles saved.' })]));
 }
 
-/* ---------------- settings ---------------- */
+const JOB_TEXT = { created: 'starting', fired: 'started', working: 'working', fetching: 'fetching', scoring: 'scoring', done: 'done', failed: 'failed' };
+function renderSettingsLists() {
+  $('blockList').replaceChildren(...(state.blocked.length ? state.blocked.map((b) => el('div', { class: 'row-card' }, avatar(b.handle),
+    el('div', { class: 'grow' }, el('b', { text: '@' + b.handle }), el('div', { class: 'line', text: 'blocked ' + agoText(b.ts) })),
+    el('button', { class: 'link', text: 'Unblock', onclick: async () => {
+      try { await api('/api/unblock', { handle: b.handle }); toast('Unblocked @' + b.handle); refresh(); } catch (e) { toast(e.message, true); }
+    } })))
+    : [el('div', { class: 'hint', text: 'Nobody blocked. Use ⋯ on a post to block someone.' })]));
+  $('jobsList').replaceChildren(...(state.jobs.length ? state.jobs.slice(0, 8).map((j) => el('div', { class: 'row-card' },
+    el('div', { class: 'grow' },
+      el('b', { text: (j.kind === 'draft' ? 'Drafting' : 'Scout') + ' · ' + (JOB_TEXT[j.status] || j.status) }),
+      el('div', { class: 'line', text: j.error || j.report || agoText(j.ts) })),
+    j.session_url ? el('a', { class: 'link', href: j.session_url, target: '_blank', rel: 'noopener', text: 'Open' }) : null))
+    : [el('div', { class: 'hint', text: 'No runs yet.' })]));
+}
 
 $('serverUrl').value = LS.get('server');
 $('password').value = LS.get('password');
-$('account').value = LS.get('account');
+$('account').value = LS.get('account', 'abhiijayVinayak');
 $('account').addEventListener('change', () => LS.set('account', $('account').value));
-
 $('saveSettings').addEventListener('click', async (e) => {
   LS.set('server', $('serverUrl').value.trim());
   LS.set('password', $('password').value);
   LS.set('account', $('account').value);
-  const done = busy(e.target, 'testing…');
-  const out = $('settingsResult');
+  const done = busy(e.target, 'Testing…');
   try {
     const h = await api('/api/health');
-    out.textContent = 'Connected. Armory: ' + (h.armory ? 'on' : 'off') + ' · Claude routine: ' + (h.routine ? 'on' : 'off') + ' · watchlist: ' + h.watchlist + ' accounts';
+    $('settingsResult').textContent = 'Connected · Armory ' + (h.armory ? 'on' : 'off') + ' · Claude ' + (h.routine ? 'on' : 'off');
     await refresh();
   } catch (err) {
-    out.textContent = err.status === 401 ? 'Wrong password.' : 'Failed: ' + err.message;
+    $('settingsResult').textContent = err.status === 401 ? 'Wrong password.' : 'Failed: ' + err.message;
   }
   done();
 });
 
-$('refreshBtn').addEventListener('click', () => { refresh(); if (!document.querySelector('[data-panel=scout]').hidden) loadScout(); });
+$('refreshBtn').addEventListener('click', () => { refresh(); if (currentTab() === 'scout') loadScout(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 
 /* ---------------- boot ---------------- */
@@ -566,9 +604,8 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
   }
 })();
 
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
-}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
 handleShareLaunch();
-showTab(LS.get('tab', 'replies') === 'settings' && LS.get('password') ? 'replies' : LS.get('tab', 'replies'));
+const startTab = LS.get('tab', 'replies');
+showTab(startTab === 'settings' && LS.get('password') ? 'replies' : startTab);
 refresh();
