@@ -93,6 +93,7 @@ QUEUE_FILE = os.path.join(DATA_DIR, "reply-queue.json")
 OUTREACH_FILE = os.path.join(DATA_DIR, "outreach-queue.json")
 JOBS_FILE = os.path.join(DATA_DIR, "jobs.json")
 SCOUT_FILE = os.path.join(DATA_DIR, "scout-runs.json")
+BLOCK_FILE = os.path.join(DATA_DIR, "blocklist.json")
 WATCHLIST_FILE = env("SIDEKICK_WATCHLIST") or os.path.join(KNOWLEDGE_DIR, "tools", "x-reply-scout-watchlist.md")
 
 LEGACY_ORIGINS = ("https://x.com", "https://twitter.com", "https://pro.x.com",
@@ -158,6 +159,59 @@ def load_jobs():
 
 def save_jobs(jobs):
     _save(JOBS_FILE, jobs[:100], "jobs")
+
+
+def handle_key(value):
+    """Lowercase bare handle for comparisons ("@Foo" -> "foo")."""
+    return str(value or "").strip().lstrip("@").lower()
+
+
+def load_blocklist():
+    return _load(BLOCK_FILE)
+
+
+def blocked_set():
+    return {handle_key(b.get("handle")) for b in load_blocklist()}
+
+
+def block_handle(body):
+    handle = normalize_x_handle(body.get("handle"))
+    if not handle:
+        return 400, {"error": "valid X handle required"}
+    items = load_blocklist()
+    if handle.lower() not in {handle_key(b.get("handle")) for b in items}:
+        items.insert(0, {"handle": handle, "ts": now_str(),
+                         "reason": str(body.get("reason") or "")[:300]})
+        _save(BLOCK_FILE, items[:2000])
+    # Drop anything of theirs still waiting for a reply.
+    queue = load_queue()
+    skipped = 0
+    for i in queue:
+        if handle_key(i.get("author")) == handle.lower() and i.get("status") in ("queued", "drafted"):
+            i["status"] = "skipped"
+            i["agent_note"] = "blocked author"
+            skipped += 1
+    if skipped:
+        save_queue(queue)
+    return 200, {"ok": True, "handle": handle, "skipped": skipped}
+
+
+def unblock_handle(body):
+    key = handle_key(body.get("handle"))
+    items = load_blocklist()
+    kept = [b for b in items if handle_key(b.get("handle")) != key]
+    _save(BLOCK_FILE, kept)
+    return 200, {"ok": True, "removed": len(items) - len(kept)}
+
+
+def engagement_gap(views, likes, replies, retweets):
+    """High views + low engagement = people see it but few have replied yet,
+    so a good reply is likely to be seen. Returns (flag, ratio)."""
+    views = views or 0
+    eng = (likes or 0) + (replies or 0) + (retweets or 0)
+    ratio = round(views / (eng + 1), 1)
+    flag = views >= 1000 and (replies or 0) <= 10 and eng <= views * 0.02
+    return flag, ratio
 
 
 def load_scout_runs():
@@ -529,9 +583,11 @@ def voice_examples():
 def start_draft_job(ids=None, account=None, note=""):
     with LOCK:
         items = load_queue()
+        blocked = blocked_set()
         todo = [i for i in items if i.get("status") == "queued"
                 and i.get("platform", "x") in ("x", "linkedin")
-                and (not ids or i.get("id") in ids)]
+                and (not ids or i.get("id") in ids)
+                and handle_key(i.get("author")) not in blocked]
         if not todo:
             return 400, {"error": "nothing queued to draft"}
         busy = {i["id"] for i in todo if i.get("drafting_job")}
@@ -549,6 +605,12 @@ def start_draft_job(ids=None, account=None, note=""):
     return 200, {"ok": True, "job": public_job(get_job(job["id"]))}
 
 
+def scout_rank(c):
+    """Lower is better: fresh, uncrowded, with a bonus for a view/engagement gap."""
+    bonus = 6 if c.get("high_view_low_eng") else 0
+    return (c.get("replies") or 0) + c["age_hours"] * 2 - bonus
+
+
 def run_scout_stage1(job_id, token):
     """Background thread: watchlist OR-search via Armory, 24h window, 1 per author."""
     try:
@@ -561,6 +623,7 @@ def run_scout_stage1(job_id, token):
         except ArmoryError:
             pass
         cutoff = datetime.now(timezone.utc) - timedelta(hours=SCOUT_WINDOW_HOURS)
+        blocked = blocked_set()
         pool, errors = {}, []
         for n in range(0, len(handles), SCOUT_CHUNK):
             chunk = handles[n:n + SCOUT_CHUNK]
@@ -588,7 +651,7 @@ def run_scout_stage1(job_id, token):
                 author = str(t.get("author") or "")
                 if not created or created < cutoff or not t.get("url"):
                     continue
-                if author.lower() in never:
+                if author.lower() in never or author.lower() in blocked:
                     continue
                 age_h = (datetime.now(timezone.utc) - created).total_seconds() / 3600
                 cand = {
@@ -602,13 +665,21 @@ def run_scout_stage1(job_id, token):
                     "retweets": t.get("retweets"), "views": t.get("views"),
                     "created_at": t.get("created_at"),
                 }
-                # Max 1 post per author: keep the fresher, less crowded one.
+                cand["high_view_low_eng"], cand["view_gap"] = engagement_gap(
+                    t.get("views"), t.get("likes"), t.get("replies"), t.get("retweets"))
+                # Max 1 post per author: prefer a high-views/low-engagement post,
+                # then the fresher, less crowded one.
                 prev = pool.get(author.lower())
-                rank = (cand["replies"] or 0) + cand["age_hours"] * 2
-                if not prev or rank < (prev["replies"] or 0) + prev["age_hours"] * 2:
+                if not prev or scout_rank(cand) < scout_rank(prev):
                     pool[author.lower()] = cand
-        cands = sorted(pool.values(), key=lambda c: ((c["replies"] or 0) + c["age_hours"] * 2))
-        cands = cands[:SCOUT_MAX_CANDIDATES]
+        # Mixed pool: up to half high-views/low-engagement posts (best gap first),
+        # the rest by freshness and low crowding, so gap posts are well represented
+        # without crowding out everything else.
+        gap = sorted((c for c in pool.values() if c["high_view_low_eng"]),
+                     key=lambda c: -c["view_gap"])[:SCOUT_MAX_CANDIDATES // 2]
+        gap_urls = {c["url"] for c in gap}
+        rest = sorted((c for c in pool.values() if c["url"] not in gap_urls), key=scout_rank)
+        cands = (gap + rest)[:SCOUT_MAX_CANDIDATES]
         with LOCK:
             runs = load_scout_runs()
             for r in runs:
@@ -674,6 +745,8 @@ def ingest_share(body):
                 fetch_error = str(e)
         if not text:
             missing = True
+        if handle_key(author) in blocked_set():
+            return 409, {"error": "%s is on your block list" % author, "kind": "reply", "blocked": True}
         with LOCK:
             code, resp = queue_add({"platform": "x", "tweet_url": turl, "tweet_text": text,
                                     "author": author, "author_followers": followers,
@@ -709,6 +782,7 @@ def agent_job_payload(job):
         return {"job_id": job["id"], "kind": "draft", "account": job["payload"].get("account"),
                 "note": job["payload"].get("note"), "items": items,
                 "voice_examples": voice_examples(),
+                "blocked_authors": sorted(blocked_set()),
                 "write_to": "/agent/job/%s/drafts" % job["id"]}
     run = next((r for r in load_scout_runs() if r["job_id"] == job["id"]), None)
     return {"job_id": job["id"], "kind": "scout",
@@ -793,7 +867,7 @@ def scout_pick(body):
     with LOCK:
         for u in urls:
             c = pool.get(u)
-            if not c:
+            if not c or handle_key(c.get("author")) in blocked_set():
                 continue
             note = "source: x-reply-scout"
             if c.get("suggested_move"):
@@ -1018,6 +1092,8 @@ class AppHandler(BaseHandler):
                     return self._json(200, {"items": load_queue()})
                 if path == "/api/outreach":
                     return self._json(200, {"items": load_outreach()})
+                if path == "/api/blocklist":
+                    return self._json(200, {"items": load_blocklist()})
                 if path == "/api/jobs":
                     return self._json(200, {"jobs": [public_job(j) for j in load_jobs()[:20]]})
                 if path == "/api/scout":
@@ -1042,6 +1118,12 @@ class AppHandler(BaseHandler):
                 return self._json(*start_draft_job(ids, body.get("account"), str(body.get("note") or "")))
             if path == "/api/scout":
                 return self._json(*start_scout_job())
+            if path == "/api/block":
+                with LOCK:
+                    return self._json(*block_handle(body))
+            if path == "/api/unblock":
+                with LOCK:
+                    return self._json(*unblock_handle(body))
             if path == "/api/scout/pick":
                 return self._json(*scout_pick(body))
             return self._json(404, {"error": "not found"})

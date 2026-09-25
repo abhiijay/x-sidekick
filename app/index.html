@@ -3,112 +3,122 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0f1115">
-  <title>X reply sidekick</title>
+  <meta name="theme-color" content="#0b0d12">
+  <title>Sidekick</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="top">
-    <div class="brand">Sidekick</div>
-    <div class="counts" id="counts">-</div>
-    <button class="icon-btn" id="refreshBtn" title="Refresh" aria-label="Refresh">&#x21bb;</button>
+    <span class="dot" id="dot" title="server status"></span>
+    <h1 id="title">Replies</h1>
+    <button class="icon" id="refreshBtn" aria-label="Refresh">&#x21bb;</button>
   </header>
 
   <div id="banner" class="banner" hidden></div>
 
-  <!-- Share-sheet landing: shown when Android shares a link into the app -->
-  <section id="shareSheet" class="card share" hidden>
-    <div class="label">Shared link</div>
-    <div id="shareUrl" class="mono small"></div>
-    <textarea id="shareNote" rows="2" placeholder="optional note for Claude (context, angle, what you know)"></textarea>
+  <!-- Android share sheet landing -->
+  <section id="shareSheet" class="sheet-card" hidden>
+    <div class="muted small">Shared</div>
+    <div id="shareUrl" class="share-url"></div>
+    <textarea id="shareNote" rows="2" placeholder="Note for Claude (optional)"></textarea>
     <div class="row">
-      <button class="primary" id="shareQueue">Add</button>
-      <button id="shareQueueDraft">Add + draft now</button>
-      <button class="ghost" id="shareCancel">Cancel</button>
+      <button class="btn primary grow" id="shareQueueDraft">Draft now</button>
+      <button class="btn grow" id="shareQueue">Just add</button>
+      <button class="btn ghost" id="shareCancel" aria-label="Cancel">✕</button>
     </div>
-    <div id="shareResult" class="small"></div>
+    <div id="shareResult" class="small muted"></div>
   </section>
-
-  <nav class="tabs" role="tablist">
-    <button role="tab" data-tab="replies" class="active">Replies</button>
-    <button role="tab" data-tab="scout">Scout</button>
-    <button role="tab" data-tab="outreach">Outreach</button>
-    <button role="tab" data-tab="settings">Settings</button>
-  </nav>
 
   <main>
     <!-- REPLIES -->
     <section data-panel="replies">
-      <div class="card add">
-        <input id="addUrl" type="url" inputmode="url" placeholder="paste an X post or profile link">
-        <button id="addBtn">Add</button>
+      <div class="seg" role="tablist">
+        <button data-seg="ready" class="on">Ready <b id="readyCount"></b></button>
+        <button data-seg="waiting">Waiting <b id="waitingCount"></b></button>
+        <button data-seg="done">Done</button>
       </div>
-      <div id="jobStrip" class="job-strip" hidden></div>
-      <div class="section-head">
-        <h2>Drafts ready <span id="draftedCount" class="muted"></span></h2>
+      <div id="jobPill" class="pill" hidden></div>
+
+      <div data-segpanel="ready"><div id="readyList"></div></div>
+
+      <div data-segpanel="waiting" hidden>
+        <div class="add">
+          <input id="addUrl" type="url" inputmode="url" placeholder="Paste an X post or profile link">
+          <button class="btn" id="addBtn">Add</button>
+        </div>
+        <button class="btn primary block" id="draftAllBtn">Draft all with Claude</button>
+        <div id="waitingList"></div>
       </div>
-      <div id="draftedList"></div>
-      <div class="section-head">
-        <h2>Waiting for Claude <span id="queuedCount" class="muted"></span></h2>
-        <button class="primary small-btn" id="draftAllBtn">Ask Claude to draft</button>
-      </div>
-      <div id="queuedList"></div>
-      <details class="done">
-        <summary>Posted / skipped</summary>
+
+      <div data-segpanel="done" hidden>
         <div id="doneList"></div>
-        <button class="ghost small-btn" id="clearDoneBtn">Clear done older than 7 days</button>
-      </details>
+        <button class="btn ghost block" id="clearDoneBtn">Clear items older than 7 days</button>
+      </div>
     </section>
 
     <!-- SCOUT -->
     <section data-panel="scout" hidden>
-      <div class="card">
-        <p class="small muted">Checks every active watchlist account for posts from the last 24h (Armory search), then Claude scores them against the reply playbook. You tick which ones to draft. Nothing is posted.</p>
-        <button class="primary" id="scoutBtn">Run scout</button>
-        <div id="scoutStatus" class="small"></div>
+      <div class="scout-head">
+        <button class="btn primary" id="scoutBtn">Run scout</button>
+        <div id="scoutStatus" class="small muted"></div>
       </div>
-      <div id="scoutReport" class="card small" hidden></div>
+      <div class="toolbar" id="scoutToolbar" hidden>
+        <div class="chips">
+          <button class="chip on" data-filter="all">All <b id="fAll"></b></button>
+          <button class="chip" data-filter="gap">High views <b id="fGap"></b></button>
+        </div>
+        <button class="link" id="selectAll">Select all</button>
+      </div>
       <div id="scoutList"></div>
-      <div class="sticky-actions" id="scoutActions" hidden>
-        <button class="primary" id="scoutPickDraft">Queue ticked + draft</button>
-        <button id="scoutPick">Queue ticked</button>
-      </div>
     </section>
 
     <!-- OUTREACH -->
     <section data-panel="outreach" hidden>
-      <p class="small muted pad">Profiles saved for the next outreach-lead batch. Share a profile from the X app, or paste it on the Replies tab. Nothing is messaged.</p>
+      <p class="hint">Profiles saved for the next outreach batch. Share a profile from X to add one.</p>
       <div id="outreachList"></div>
     </section>
 
     <!-- SETTINGS -->
     <section data-panel="settings" hidden>
-      <div class="card">
-        <label class="label" for="serverUrl">Server URL</label>
-        <input id="serverUrl" type="url" placeholder="leave empty when the app is opened from the server itself">
-        <label class="label" for="password">App password</label>
-        <input id="password" type="password" autocomplete="current-password" placeholder="SIDEKICK_APP_PASSWORD">
-        <label class="label" for="account">Account for drafts</label>
+      <div class="card form">
+        <label for="serverUrl">Server URL</label>
+        <input id="serverUrl" type="url" placeholder="https://…ngrok-free.dev">
+        <label for="password">App password</label>
+        <input id="password" type="password" autocomplete="current-password">
+        <label for="account">Draft replies as</label>
         <select id="account">
-          <option value="">both per writer guide (k77builds + decoy)</option>
-          <option value="k77builds">@k77builds only</option>
-          <option value="kshetezVinayak">@kshetezVinayak only</option>
-          <option value="abhiijayVinayak">@abhiijayVinayak (3 voices: Avery/Arthur/Abhiijay)</option>
+          <option value="abhiijayVinayak">@abhiijayVinayak (Avery · Arthur · own)</option>
+          <option value="k77builds">@k77builds</option>
+          <option value="kshetezVinayak">@kshetezVinayak</option>
+          <option value="">Both founder accounts (writer guide default)</option>
         </select>
-        <div class="row">
-          <button class="primary" id="saveSettings">Save + test</button>
-        </div>
-        <div id="settingsResult" class="small"></div>
+        <button class="btn primary block" id="saveSettings">Save and test</button>
+        <div id="settingsResult" class="small muted"></div>
       </div>
-      <div class="card small">
-        <div class="label">Recent Claude runs</div>
-        <div id="jobsList"></div>
-      </div>
+      <h3>Blocked</h3>
+      <div id="blockList"></div>
+      <h3>Recent Claude runs</h3>
+      <div id="jobsList"></div>
     </section>
   </main>
 
+  <div class="actionbar" id="scoutActions" hidden>
+    <button class="btn primary grow" id="scoutPickDraft">Draft selected</button>
+    <button class="btn" id="scoutPick">Queue only</button>
+  </div>
+
+  <nav class="tabbar">
+    <button data-tab="replies" class="on"><span class="ico">✎</span>Replies<i id="navBadge"></i></button>
+    <button data-tab="scout"><span class="ico">⌕</span>Scout</button>
+    <button data-tab="outreach"><span class="ico">☺</span>Outreach</button>
+    <button data-tab="settings"><span class="ico">⚙</span>Settings</button>
+  </nav>
+
+  <div id="sheet" class="overlay" hidden>
+    <div class="action-sheet" id="sheetBody"></div>
+  </div>
   <div id="toast" class="toast" hidden></div>
   <script src="app.js"></script>
 </body>
