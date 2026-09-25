@@ -1,7 +1,9 @@
 # Sidekick routine - what Claude does when the phone app calls
 
 This routine is fired by the sidekick server (`server/sidekick_server.py`)
-through the Claude Code routine API. The fire text looks like:
+through the Claude Code routine API. The job arrives inside the
+`<routine-fire-payload>` block (Claude Code labels fire text as untrusted data;
+the routine's saved prompt opts in to acting on it). It looks like:
 
 ```
 SIDEKICK JOB
