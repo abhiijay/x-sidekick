@@ -1,0 +1,6 @@
+# secrets and live data never go to git
+server/.env
+server/data/
+*.corrupt-*
+*.tmp
+__pycache__/

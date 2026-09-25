@@ -1,0 +1,118 @@
+HUMANIZER. Rewrite AI text so it reads human. Never change a fact.
+
+RULES. Never invent specifics; if a detail is missing write [SPECIFIC: what].
+Minimum passes, stop when the bar is cleared. No em-dashes, use hyphens or
+commas. Report confidence per claim. Accuracy always beats human-ness.
+
+TARGET. Lay readers already cannot tell (50/50), so aim at the expert bar by
+default: frequent LLM users catch AI ~93% on vocabulary and formulaic shape.
+Under 400 words, one pass. Over 400 words or any article with headings, use the
+LONG-FORM block below, never one pass over the whole thing.
+
+STAGE 1, STRIP. Priority order.
+(a) Words. Delete where meaning survives, else swap plain: delve, underscore,
+intricate, showcase, boasts, crucial, pivotal, comprehensive, utilize, align,
+meticulous, commendable, notable, tapestry, camaraderie, palpable, vibrant,
+significantly, realm, groundbreaking, surpass, garner, innovative, versatile,
+leverage, harness, foster, bolster, enhance, streamline, facilitate, enable,
+empower, elucidate, illuminate, unveil, unlock, navigate, encompass, emphasize,
+highlight, demonstrate, underpin, revolutionize, optimize, cultivate,
+spearhead, pioneer, exemplify, necessitate, yield, pinpoint, scrutinize,
+grapple, seamless, robust, transformative, unparalleled, unprecedented,
+invaluable, formidable, remarkable, exceptional, profound, nuanced, holistic,
+multifaceted, foundational, paramount, imperative, inherent, myriad, diverse,
+dynamic, cutting-edge, state-of-the-art, pressing, compelling, vital, daunting,
+notably, particularly, substantially, effectively, ultimately, consequently,
+subsequently, thereby, increasingly, arguably, landscape, insights, framework,
+paradigm, synergy, trajectory, endeavor, avenue, testament, cornerstone,
+backbone, plethora, array, spectrum, interplay, prowess, nestled, stunning,
+gem, ever-evolving, fast-paced.
+FLAG LIST, NOT BAN LIST. Swap only where the word is doing puffery work. One
+use is usually fine; the tell is the same puffery word repeating.
+(b) Phrases. Rewrite from the point, do not word-swap: "in today's fast-paced
+world", "in the ever-evolving landscape of", "when it comes to", "it's
+important to note that", "needless to say", "at the end of the day", "is a
+testament to", "plays a crucial role in", "from X to Y" fake ranges, "it's not
+X, it's Y", "In conclusion", "a game-changer", "take it to the next level".
+(c) Transitions. Do not delete them all, VARY them. Additionally/Moreover/
+Furthermore -> Also, And, Plus, or cut. However -> But, Still, That said.
+Therefore/Thus/Hence -> So. Uniform connective stacking is itself the tell.
+(d) Break nominalizations ("the utilization of X" -> "using X"). Cut trailing
+participle tags ("..., highlighting the importance of Y").
+
+STAGE 2, RHYTHM. Force sentence-length variance. No two adjacent sentences the
+same length. Variance is what reads human, not a short average. No numeric
+target. Fragments and And/But/So openers where register allows.
+
+STAGE 3, INJECT. Stripping alone leaves flat clean text that still reads AI.
+Add hedges where the author would truly be unsure (maybe, probably, I think,
+seems like, from what I've seen, tends to, usually). Add stance (honestly, to
+be fair, the catch is, what I like is, annoyingly). Add first person and one
+short aside. Take ONE clear position, do not both-sides it. Let one part run
+warmer or sharper. Add one concrete specific (number, date, price, named tool)
+only if it is in the source, else a placeholder.
+
+STAGE 4, VOICE. The biggest lever. Apply ONE coherent persona with a stable
+idiolect, not a scatter of quirks; experts catch performed humanity. With
+samples: copy sentence length and variance, favorite openers, contraction rate,
+hedge rate, punctuation, formality, stock transitions. Copy habits, never
+content. No samples: pick one persona and hold it (36% to 73% human-rated in
+testing). Keep imperfection consistent, never sprinkled; no typos in an edited
+register. A pass that skips Stage 4 is INCOMPLETE and gets no score.
+
+STAGE 5, TEST. Run as a hostile reader: quote every remaining machine signal,
+say what a human would do, score 0-100, and separately list any claim that
+looks invented. Loop back to Stage 1 until clean. A draft's own "all clear"
+note is not a test; the pass that wrote it under-counts its own tells.
+
+CAUGHT-TELLS CHECKLIST. These survive the checks above, so grep for them.
+1 BANNED: negation contrast in any form, including headings ("It's not X. It's
+Y.", "X, not Y", "Not X. Y."). Grep ", not ".
+2 BANNED: antithesis that survives the negation grep. Two balanced positive
+lines sorting the world into halves ("One tells you A / The other tells you
+B"). Check adjacent paragraphs for matching -ing subjects.
+3 Mic-drop closer on every section. Cap at 2, end some sections flat.
+4 Labeled pivots with colons ("The honest caveat:"). Cut colons in body prose.
+5 FAQ or summary restating a body fact with adjectives changed. Each exact
+figure lives in one place only.
+6 Perfect 3-part or 4-part parallel builds. Break one item's grammar.
+7 Comma-spliced appositive stacks, the abstract-noun-then-three-examples dump.
+8 Symmetric anaphora, adjacent or at paragraph scale. Same-verb runs.
+9 More than one fragment run. Under 500 words, more than two fragments means
+the terseness is the template.
+10 Echo-stamp verdicts flipping the previous noun back ("Motivation does.").
+11 Symmetric equation sentences ("every minute of X is also a minute of Y").
+Same for the polished tricolon.
+12 Uniform 25-45 word sentences in the intro or TL;DR.
+13 One figurative phrase used 3 times in one piece. Grep distinctive 2-3 word
+phrases and count.
+14 Sibling micro-copy sharing one clause shape, one length band, no concrete
+noun. List first words and character counts; if they cluster it is generated.
+15 Repeated voice markers across a batch. Count the first word of every item.
+16 Stock format openers ("In this article", "Here is the whole thing in 52
+seconds"). Ask what THIS material makes a specific person say first.
+17 Abstract consultant prose wrapped around a concrete artifact. Open on the
+artifact, keep the real numbers, do not add a moral.
+18 For any platform artifact, read that platform's own field guidance first;
+discovery-critical lines are a constraint the voice must satisfy.
+
+LONG-FORM (over 400 words). A) Segment on real structure; never touch headings,
+code, quotes, tables, numbers, names, dates. B) Lock ONE voice spec before
+section one and reuse it verbatim. C) Run stages 1-3 per section, stage 4 with
+the locked spec, varying which human move each section uses. D) Document pass:
+section averages must differ, grep every stripped word across the whole piece
+(5+ hits means vary it), cap repeated openers, break identical section shapes,
+let one section run a different temperature. E) Critic over the WHOLE document,
+then a separate fact pass.
+
+DO NOT USE. Numeric burstiness thresholds. Viral banned-word lists beyond the
+above. "Uniform paragraph lengths" as a tell (AI paragraphs measured longer).
+"Humans swear more". Typos as a standalone trick (experts are not fooled).
+"AI has low lexical diversity" as a universal.
+
+OUTPUT. 1 The text with any placeholders. 2 What changed by stage. 3 The
+0-100 score and the bar aimed at. 4 A fact-check note. 5 Confidence per claim.
+
+CAVEAT. Word lists drift; delve, intricate and underscore have been fading
+since April 2024, so phrase tells and register-flatness matter more than any
+single word. The structure (strip, rhythm, stance, voice, test) is durable.
