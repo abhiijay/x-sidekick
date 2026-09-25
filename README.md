@@ -65,9 +65,16 @@ Secrets never go into git. The repo is public.
      token into `ROUTINE_TOKEN` (the token is shown only once). Restart the server.
    - In the routine's cloud environment, go to **Network access** and allow your ngrok host,
      otherwise Claude can't send the drafts back.
-6. **Phone**: open `https://<your ngrok url>/app/` in Chrome on Android, open the menu, choose
-   **Install app** (or **Add to Home screen**), then enter the password in Settings.
-   After that, sharing a post from the X app lists **Sidekick** in the share sheet.
+6. **Phone**. Use the GitHub Pages copy of the app, which avoids ngrok's browser warning page:
+   - One-time: the repo owner turns on GitHub Pages under repo **Settings → Pages → Build and deployment**:
+     Source **Deploy from a branch**, branch **main**, folder **/ (root)**, **Save**.
+   - On the Mac, add `SIDEKICK_ALLOWED_ORIGINS=https://abhiijay.github.io` to `server/.env` and restart the server.
+   - On the Android phone, open this in **Chrome**, with your ngrok URL after `server=`:
+     `https://abhiijay.github.io/x-sidekick/app/?server=https://<your ngrok url>`
+     Then use Chrome's menu, choose **Install app**, open it, and enter the password in Settings.
+   - After that, sharing a post from the X app lists **Sidekick** in the share sheet.
+   - The server also serves the app at `https://<your ngrok url>/app/`, but on ngrok's free plan that
+     page sits behind ngrok's browser warning, which can stop Android from installing it.
 
 ## Using it
 

@@ -131,7 +131,8 @@ document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('cli
 /* ---------------- load + render ---------------- */
 
 async function refresh() {
-  if (!LS.get('password')) {
+  const needsServer = !LS.get('server') && location.hostname.endsWith('github.io');
+  if (!LS.get('password') || needsServer) {
     banner('Set the server URL and app password in Settings first.');
     showTab('settings');
     return;
@@ -395,13 +396,15 @@ $('addBtn').addEventListener('click', async (e) => {
 });
 
 function handleShareLaunch() {
-  if (!location.pathname.startsWith('/app/share')) return;
   const p = new URLSearchParams(location.search);
+  // Android share target opens this page with title/text/url params
+  // (older server-hosted installs used /app/share?...).
+  if (!p.has('text') && !p.has('url') && !p.has('title') && !location.pathname.includes('/share')) return;
   // X's share puts the link in `text` (sometimes with extra words), not `url`.
   const raw = [p.get('url'), p.get('text'), p.get('title')].filter(Boolean).join(' ');
   const m = raw.match(/https?:\/\/\S+/);
   const url = m ? m[0] : '';
-  history.replaceState(null, '', '/app/');
+  history.replaceState(null, '', location.pathname.replace(/share\/?$/, ''));
   const sheet = $('shareSheet');
   sheet.hidden = false;
   $('shareUrl').textContent = url || raw || '(nothing shared)';
@@ -552,8 +555,19 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
 
 /* ---------------- boot ---------------- */
 
+(function takeServerParam() {
+  const p = new URLSearchParams(location.search);
+  const s = p.get('server');
+  if (s && /^https:\/\//.test(s)) {
+    LS.set('server', s.replace(/\/$/, ''));
+    $('serverUrl').value = LS.get('server');
+    p.delete('server');
+    history.replaceState(null, '', location.pathname + (p.toString() ? '?' + p : ''));
+  }
+})();
+
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js', { scope: '/app/' }).catch(() => {});
+  navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
 }
 handleShareLaunch();
 showTab(LS.get('tab', 'replies') === 'settings' && LS.get('password') ? 'replies' : LS.get('tab', 'replies'));
