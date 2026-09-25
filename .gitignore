@@ -4,3 +4,4 @@ server/data/
 *.corrupt-*
 *.tmp
 __pycache__/
+server/*.log

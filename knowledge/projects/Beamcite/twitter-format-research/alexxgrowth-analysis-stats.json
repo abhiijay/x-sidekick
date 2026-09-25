@@ -1,0 +1,1688 @@
+{
+  "coverage": {
+    "total": 1508,
+    "originals": 605,
+    "replies": 902,
+    "retweets": 1,
+    "oldest": "2024-08-07T06:51:38+00:00",
+    "newest": "2026-07-30T04:07:52+00:00"
+  },
+  "originals": {
+    "count": 605,
+    "chars": {
+      "median": 237,
+      "mean": 625.17,
+      "p90": 1787,
+      "max": 5405
+    },
+    "words": {
+      "median": 41,
+      "mean": 106.36
+    },
+    "lines": {
+      "median_per_item": 5,
+      "mean_per_item": 12.39,
+      "multi_line_pct": 81.98,
+      "median_line_chars": 40.0,
+      "p90_line_chars": 91,
+      "ending_counts": {
+        ".": 500,
+        "bare": 6238,
+        ":": 624,
+        "?": 119,
+        "!": 3
+      },
+      "bare_end_pct": 83.35
+    },
+    "style": {
+      "starts_lower_pct": 85.29,
+      "starts_upper_pct": 14.55,
+      "question_end_pct": 3.8,
+      "question_any_pct": 22.31,
+      "emoji_pct": 8.93,
+      "url_pct": 20.5,
+      "hashtag_pct": 0.0,
+      "top_emojis": [
+        [
+          "➼",
+          18
+        ],
+        [
+          "😭",
+          7
+        ],
+        [
+          "🥀",
+          5
+        ],
+        [
+          "💀",
+          4
+        ],
+        [
+          "💔",
+          4
+        ],
+        [
+          "🫡",
+          3
+        ],
+        [
+          "❤",
+          3
+        ],
+        [
+          "🩹",
+          3
+        ],
+        [
+          "😂",
+          3
+        ],
+        [
+          "👇",
+          2
+        ],
+        [
+          "🙈",
+          2
+        ],
+        [
+          "📈",
+          2
+        ],
+        [
+          "🤣",
+          2
+        ],
+        [
+          "🔜",
+          2
+        ],
+        [
+          "😉",
+          2
+        ],
+        [
+          "🙏",
+          2
+        ],
+        [
+          "👻",
+          2
+        ],
+        [
+          "🚨",
+          2
+        ],
+        [
+          "🐐",
+          1
+        ],
+        [
+          "🙂",
+          1
+        ]
+      ]
+    },
+    "performance": {
+      "views_median": 5210,
+      "views_mean": 19911.89,
+      "views_max": 1212786,
+      "likes_median": 37,
+      "likes_mean": 108.48,
+      "likes_max": 4983,
+      "replies_median": 5,
+      "bookmarks_median": 17,
+      "bookmarks_max": 5075
+    }
+  },
+  "replies": {
+    "count": 902,
+    "chars": {
+      "median": 43.0,
+      "mean": 57.62,
+      "p90": 111,
+      "max": 490
+    },
+    "words": {
+      "median": 7.0,
+      "mean": 9.44
+    },
+    "lines": {
+      "median_per_item": 1.0,
+      "mean_per_item": 1.17,
+      "multi_line_pct": 12.97,
+      "median_line_chars": 40.0,
+      "p90_line_chars": 91,
+      "ending_counts": {
+        "bare": 959,
+        ".": 37,
+        "?": 25,
+        "!": 8,
+        ":": 13
+      },
+      "bare_end_pct": 92.03
+    },
+    "style": {
+      "starts_lower_pct": 68.63,
+      "starts_upper_pct": 31.37,
+      "question_end_pct": 2.66,
+      "question_any_pct": 3.55,
+      "emoji_pct": 4.77,
+      "url_pct": 8.65,
+      "hashtag_pct": 0.0,
+      "top_emojis": [
+        [
+          "😭",
+          22
+        ],
+        [
+          "🙏",
+          7
+        ],
+        [
+          "🤣",
+          6
+        ],
+        [
+          "💔",
+          4
+        ],
+        [
+          "🤬",
+          3
+        ],
+        [
+          "👀",
+          2
+        ],
+        [
+          "😂",
+          2
+        ],
+        [
+          "💀",
+          2
+        ],
+        [
+          "😘",
+          2
+        ],
+        [
+          "🤫",
+          2
+        ],
+        [
+          "😡",
+          2
+        ],
+        [
+          "😤",
+          2
+        ],
+        [
+          "😉",
+          1
+        ],
+        [
+          "🔜",
+          1
+        ],
+        [
+          "😳",
+          1
+        ],
+        [
+          "👍",
+          1
+        ],
+        [
+          "🤷",
+          1
+        ],
+        [
+          "♂",
+          1
+        ],
+        [
+          "🌹",
+          1
+        ],
+        [
+          "👿",
+          1
+        ]
+      ]
+    },
+    "performance": {
+      "views_median": 480.5,
+      "views_mean": 1435.91,
+      "views_max": 127288,
+      "likes_median": 3.0,
+      "likes_mean": 5.73,
+      "likes_max": 178,
+      "replies_median": 1.0,
+      "bookmarks_median": 0.0,
+      "bookmarks_max": 96
+    }
+  },
+  "shape_stats": {
+    "contrarian_take": {
+      "count": 77,
+      "share_pct": 12.73,
+      "views_median": 4240,
+      "likes_median": 28,
+      "replies_median": 4,
+      "bookmarks_median": 15
+    },
+    "list": {
+      "count": 20,
+      "share_pct": 3.31,
+      "views_median": 5691.0,
+      "likes_median": 39.5,
+      "replies_median": 4.5,
+      "bookmarks_median": 20.0
+    },
+    "observation_or_update": {
+      "count": 226,
+      "share_pct": 37.36,
+      "views_median": 4370.0,
+      "likes_median": 28.5,
+      "replies_median": 3.5,
+      "bookmarks_median": 7.0
+    },
+    "offer_or_cta": {
+      "count": 30,
+      "share_pct": 4.96,
+      "views_median": 6228.5,
+      "likes_median": 47.0,
+      "replies_median": 5.0,
+      "bookmarks_median": 17.5
+    },
+    "question": {
+      "count": 17,
+      "share_pct": 2.81,
+      "views_median": 3081,
+      "likes_median": 21,
+      "replies_median": 7,
+      "bookmarks_median": 4
+    },
+    "result_or_receipt": {
+      "count": 158,
+      "share_pct": 26.12,
+      "views_median": 7496.5,
+      "likes_median": 61.0,
+      "replies_median": 7.0,
+      "bookmarks_median": 37.5
+    },
+    "story_or_origin": {
+      "count": 22,
+      "share_pct": 3.64,
+      "views_median": 7624.5,
+      "likes_median": 80.0,
+      "replies_median": 11.5,
+      "bookmarks_median": 34.0
+    },
+    "tactical_list": {
+      "count": 9,
+      "share_pct": 1.49,
+      "views_median": 15124,
+      "likes_median": 169,
+      "replies_median": 12,
+      "bookmarks_median": 155
+    },
+    "teaching": {
+      "count": 46,
+      "share_pct": 7.6,
+      "views_median": 4575.0,
+      "likes_median": 37.5,
+      "replies_median": 4.5,
+      "bookmarks_median": 23.5
+    }
+  },
+  "top_by_views": [
+    {
+      "id": "2068352338268750162",
+      "date": "2026-06-20T15:16:40+00:00",
+      "text": "https://t.co/fWHuJ4VrxU",
+      "url": "https://x.com/alexxgrowth/status/2068352338268750162",
+      "views": 1212786,
+      "likes": 1438,
+      "replies": 118,
+      "retweets": 179,
+      "bookmarks": 5075,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2073040719128801645",
+      "date": "2026-07-03T13:46:37+00:00",
+      "text": "I JUST SOLD MY COMPANY AT 16 YEARS OLD\n\nwords can not describe how i feel rn\n\nwe exited for 7-figures. virality did $3M+ in revenue in 10 months, fully bootstrapped\n\nthis is the full story of how it all started and ended, but first I need to be honest:\n\nmy name isn’t alex, its yanal. as of today i’m one of the youngest self made millionaires in the world\n\nbut it wasn’t like this a few years ago. when i was 14 i realized i wanted to build something awesome (and make a lot of money doing so)\n\ni found my cofounder Ivelin because one of his affiliates was posting on TikTok about a make money server. i joined as a regular member, nothing special. when he reopened the affiliate program I jumped in and my first video did 3M views.\n\nthat got me promoted to manager. a while later I pitched him on starting a clipping agency together. that agency became Virality.\n\nwe met Matt on discord around the time he got a job offer at Whop to be their head of clipping\n\ni told him not to go, and to start Virality with me. he said yes\n\nwe’re three teenagers who met on the internet, zero funding, zero connections. and in under a year we built something worth acquiring.\n\nand it has been the most FUN time of my life\n\nwe’ve been on the wall street journal, got in contact with the whitehouse, ran content for BILLIONAIRES, pissed off tjr, worked with tjr, have made todays news dozens of times, and our content has been seen by 300B+ people\n\nVirality is in great hands with .@ninja_reach and will keep helping creators and brands win.\n\nas for us, we're going all in on Content Rewards, the platform Virality itself runs on. we built one agency on top of it. now we're building what every agency in this space runs on.\n\nshoutouts to my cofounders, close friends and partners:\n\n@waliet took a shot on a random affiliate with one viral video and let me pitch him a whole company. mentored me from day one. nobody understands this industry like him.\n\n@organicbond could've been our biggest competitor. Instead he became the best CGO I know and the hardest worker on the team.\n\n@facelessfarms for being our head director and one of the best marketers i’ve ever worked with. this guy is amazing.\n\n@danvsi for picking us up to build content rewards with him. none of this would be possible without his influence\n\n@itspairaw for helping us with our twitter content early on and later on during the transition. hands down the best marketer on twitter.\n\nand most importantly: thank ALL of you for following me and supporting me\n\nstay in touch, content rewards has some massive updates coming soon\n\nand i can NOT wait to share them with you",
+      "url": "https://x.com/alexxgrowth/status/2073040719128801645",
+      "views": 704997,
+      "likes": 2772,
+      "replies": 410,
+      "retweets": 109,
+      "bookmarks": 1781,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2033968029969825910",
+      "date": "2026-03-17T18:05:42+00:00",
+      "text": "me realizing people spend 5 years in university when they could have just read this article and made $10,000 a week https://t.co/WjhB9fy7EY",
+      "url": "https://x.com/alexxgrowth/status/2033968029969825910",
+      "views": 459432,
+      "likes": 2412,
+      "replies": 18,
+      "retweets": 200,
+      "bookmarks": 4178,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2056028719379001615",
+      "date": "2026-05-17T15:07:00+00:00",
+      "text": "all the most successful startups are all doing this rn\n\nthey have multiple accounts where they all post different formats, different content, and post them consistently\n\npush out 20 to 30 videos a day, if you post 300 to 1,000 videos a month\n\nthere is no way that you are not going to succeed…\n\nbut doing that all by yourself is basically trying to push a 50-pound boulder up a mountain\n\nthe short cut loop to that is Content Rewards\n\non Content Rewards, you can launch a campaign, put a budget\n\nsuddenly overnight, you have 30+ accounts with your app's branding that are consistently posting for your brand because they want to earn the campaign money\n\nyou can specify a viral format, and put them in a drive and get them to your creators\n\ncreators will multiply the viral format and post 20, 30, even 50 times a day\n\nand all of this is before you even spend a dollar\n\nyou only pay clippers/creators when they generate views for you\n\n$0.12 cents to $1 cpm on verified views only\n\nthat's exactly how we're getting brands super bowl level views in such short time and spend",
+      "url": "https://x.com/alexxgrowth/status/2056028719379001615",
+      "views": 415088,
+      "likes": 1788,
+      "replies": 53,
+      "retweets": 94,
+      "bookmarks": 3288,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1992901388876107865",
+      "date": "2025-11-24T10:21:32+00:00",
+      "text": ".@brezscales  is a scammer and doesn't pay his creators\n\nhes $500k+ in debt to his clippers and doesn't plan on paying them back\n\nhow the fuck could .@whop  let this happen?\n\nbrez is using whops lack of quality control to \"pump and dump\" clipping campaigns\n\nlets say you made a video that got 1,500,000 views at a $1 CPM\n\nbrez now owes you $1.5k\n\nyou submit your clip for payouts\n\nbut instead of paying you\nbrez ENDS THE CAMPAIGN\n\nso now you haven't been compensated for the millions of views you've generated\n\nthis isn't just a random unlucky timing thing\n\nthis has happened to dozens of clippers that brez is working with\n\nin the screenshot below, you can see his campaign manager share a dashboard of his CPM\n\n$0.32/1k views\n\nbut wait\n\nAREN'T YOU PAYING THEM$ $1-$1.5 PER 1K VIEWS?\n\nbrez is:\n\n1/ starting new campaigns every 2-4 weeks\n2/ waiting for campaigns to get multiple millions of views\n3/ ENDING THE CAMPAIGNS while multiple clippers are waiting for payments of $1k-$50k\n4/ repeat \n\nwhat the fuck?\n\nhow has whop not caught onto this sooner?\n\ni would never ever let this happen in virality\n\nwe only work with quality brands who can actually pay and we're always transparent with the budget\n\nif a budget were to expire and not be renewed for a while, i pay out of pocket to make sure our clippers are fed and our brands are happy\n\nbut what Brez is doing is borderline criminal\n\nactually IT IS CRIMINAL\n\nand it's clearly not a mistake because this is happening multiple times\n\ninfact they JUST started another campaign\n\nit's getting out of hand\n\n.@whop .@brezscales  please address this",
+      "url": "https://x.com/alexxgrowth/status/1992901388876107865",
+      "views": 383604,
+      "likes": 876,
+      "replies": 73,
+      "retweets": 25,
+      "bookmarks": 326,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2023824849073021389",
+      "date": "2026-02-17T18:20:19+00:00",
+      "text": "people will ignore this, then wonder why they haven't hit their new years resolutions",
+      "url": "https://x.com/alexxgrowth/status/2023824849073021389",
+      "views": 317027,
+      "likes": 1231,
+      "replies": 7,
+      "retweets": 68,
+      "bookmarks": 2249,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "1957850046000414917",
+      "date": "2025-08-19T17:00:00+00:00",
+      "text": "okay interesting discovery:\n\nif 17 creators post identical content within 3 minutes\nthe algorithm thinks it's \"breaking news\"\npushes everything to trending\n\ntested this 32 times with a few in-house ghost creators\nALWAYS works\n\nmanufacturing news > reporting news",
+      "url": "https://x.com/alexxgrowth/status/1957850046000414917",
+      "views": 305812,
+      "likes": 4983,
+      "replies": 95,
+      "retweets": 156,
+      "bookmarks": 2165,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "1957844726750552146",
+      "date": "2025-08-19T16:38:52+00:00",
+      "text": "i'm 15 and i just got wired $1M to manage a clients clipping campaign\n\nask me anything",
+      "url": "https://x.com/alexxgrowth/status/1957844726750552146",
+      "views": 274695,
+      "likes": 1542,
+      "replies": 184,
+      "retweets": 15,
+      "bookmarks": 581,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2033638447177519257",
+      "date": "2026-03-16T20:16:03+00:00",
+      "text": "https://t.co/KzTsIK9UdV",
+      "url": "https://x.com/alexxgrowth/status/2033638447177519257",
+      "views": 263490,
+      "likes": 451,
+      "replies": 6,
+      "retweets": 24,
+      "bookmarks": 1513,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "1994482791371756026",
+      "date": "2025-11-28T19:05:27+00:00",
+      "text": "people calling her \"mid\" while she prints $4M a month are missing the entire point of the internet right now.\n\nshe didn't need to be a 10/10. she just needed to be \"clippable.\n\nthe funniest part is she didn't even hire an agency\n\nshe accidentally built a decentralized media company because 50,000 random kids realized they could farm views by reposting her content\n\nshe pretty much became a \"raw asset\" for the algorithm.\n\nevery time she stands still in a spider-man costume, thousands of editors download the footage, add their own caption (\"me waiting for him to text back\"), and flood TikTok & IG.\n\nbut here is where she is leaving money on the table:\n\nright now, she relies on \"simp luck.\"\n\nif the trend dies, her distribution dies.\n\nif i was managing her, i would stop relying on randoms and actually hire the top 100 editors to run official burner accounts\n\nlock them into a contract\n\ngive them exclusive footage\n\nit'd force the trend to stay alive for 5 years instead of 5 months\n\nthese organic waves are great but you NEED ghost creators to have predictable inputs and outputs\n\nif you have a personal brand and you aren't recruiting your own fans to distribute your content...\n\nyou are literally hoping for a lottery ticket when you could just build a machine.\n\nif you want access to the 100,000+ teenage creators i manage, DM me and i'll get back to you",
+      "url": "https://x.com/alexxgrowth/status/1994482791371756026",
+      "views": 226369,
+      "likes": 542,
+      "replies": 32,
+      "retweets": 11,
+      "bookmarks": 652,
+      "classification": "story_or_origin"
+    },
+    {
+      "id": "2031950798658097516",
+      "date": "2026-03-12T04:29:56+00:00",
+      "text": "a lot of people have been telling me clipping is a scam\n\nSOO i'm putting myself in a 30 day challenge to prove that ANYONE can make $10k/mo in 30 days\n\nthe rules:\n\n- starting with $0\n- fresh Content Rewards account\n- no special access. same tools anybody gets on day 1\n\nthe whole point is to show that if the CEO of a clipping company can do this w/ the same tools you have access to, there's nothing stopping you from doing it too\n\nthe goal: \n\n$10,000 in 30 days - enough to buy a Rolex in cash\n\nif i hit it, i buy it and give it to one of my followers here\n\nif i don’t i do a face reveal and give whatever money i made to israel\n\neverything will be journaled daily on X\n\nevery clip, every dollar i make, every new thing i learn\n\nand then you'll see what happens when the compounding kicks in\n\nday 1 starts tomorrow\n\nfollow + rt if you wanna stay tuned :)",
+      "url": "https://x.com/alexxgrowth/status/2031950798658097516",
+      "views": 183979,
+      "likes": 754,
+      "replies": 53,
+      "retweets": 79,
+      "bookmarks": 783,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1959027808044196263",
+      "date": "2025-08-22T23:00:01+00:00",
+      "text": "okay i haven't tested this myself yet\n\nbut i figured out how to crash any restaurant's stock using 5,000 food tiktokers\n\n(never doing this but someone will)\n\nstep 1: short the stock, buy puts on chipotle\n\nstep 2: 5,000 creators post \"got food poisoning from chipotle\"\n\nstep 3: fake receipts, fake hospital bands, fake evidence \n\nstep 4: news picks up \"viral food poisoning trend\" \n\nstep 5: stock drops 40% from reputation crisis \n\nstep 6: puts print money\n\ntimeline: \n72 hours from activation to stock crash \n\ncost: \n$20k-$200k for creator payments\n\nreturn: \n$10M+ from options\n\nthe beautiful part: \nimpossible to prove coordination ❤️‍🩹\n\ncreators just \"happened\" to get sick same week algorithm \"randomly\" pushed the content \n\nSEC can't prosecute viral content LOL\n\na client offered us 5-figures to run a similar play but i said no because i'm not insane\n\nbut someone else will figure this out \nprobably already happening\nto a brand near you\n\nthis is why i stick to making apps/products/brands go viral \n\nmuch less illegal\n\nwhen 5,000 people say your food sucks... \n\nreality becomes negotiable\n\nand when 5,000 people are telling tiktok how amazing and helpful your brand is...\n\nreality becomes virality",
+      "url": "https://x.com/alexxgrowth/status/1959027808044196263",
+      "views": 175071,
+      "likes": 467,
+      "replies": 69,
+      "retweets": 8,
+      "bookmarks": 290,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2037872331578589677",
+      "date": "2026-03-28T12:40:00+00:00",
+      "text": "Absouloutly fucked that this is shared for $0. https://t.co/ULWzfz0bLy",
+      "url": "https://x.com/alexxgrowth/status/2037872331578589677",
+      "views": 143104,
+      "likes": 598,
+      "replies": 6,
+      "retweets": 37,
+      "bookmarks": 1282,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "1957087559248404549",
+      "date": "2025-08-17T14:30:09+00:00",
+      "text": "How I Generate 300M Views Monthly With Ghost Content\n\nfirst: you can't rely on quality\n\n\"quality\" is finding 3 influencers, paying them $10k each and telling them to \"post about your brand for a month\"\n\ninfluencer marketing is liability marketing. \n\nthey could get banned and their followers are gone. they could get exposed and nobody likes them anymore\n\nnot to mention they're just three people with an audience\n\none viral post once doesnt mean their brand is reputable\n\nsecond: you need to rely on quantity\n\ninstead of 3 influencers posting 2/week about your product\n\nhire 50 ghost creators to make faceless accounts posting about your product/brand/app\n\neach creator posts 2-3x/day minimum\n\nthats 150 posts per day\n\ntons of popular artists/brands are doing this:\n\ncluely\nkhantrast\nkalogeras sisters\n\nthey're generating 10M views/day organically like this\n\nit's a bit different for me because i manage 18k ghost creators\n\nthats a lot of accounts, posting a lot of content, with a lot of questions\n\nbut also a lot of money to be made\n\nsegue into point 3:\n\nthird:\nprompt the content\n\nyou can't tell your ghost creators to post whatever\n\nlike you have to be VERY SPECIFIC with what you want them to do\n\neven restrict payment when they don't listen or go off campaign\n\nbecause you can very easily control 3 influencers\n\nbut when you're dealing with 18k creators like i am\n\nyou have to be assertive\n\nand remember:\n\nthe content won't be amazing\nit'll be good\nit'll be consistent\n\n^ this is the goal\n\nconsistent, good content to get eyes and clicks for your brand\n\nthis is also the most profitable marketing model in 2025 \n\nbecause you're spending 80% less on ads and all of the ads are organic. \n\nno sponsorships. just creators posting \"look at this cool guy/app/thing i found!\"\n\nghost content WORKS because it's ORGANIC at scale.",
+      "url": "https://x.com/alexxgrowth/status/1957087559248404549",
+      "views": 139476,
+      "likes": 313,
+      "replies": 21,
+      "retweets": 13,
+      "bookmarks": 571,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2058195718200803627",
+      "date": "2026-05-23T14:37:53+00:00",
+      "text": "Don’t just bookmark this\n\nGenuinely read it. You can change your life.",
+      "url": "https://x.com/alexxgrowth/status/2058195718200803627",
+      "views": 132449,
+      "likes": 247,
+      "replies": 6,
+      "retweets": 18,
+      "bookmarks": 693,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2057956944359661620",
+      "date": "2026-05-22T22:49:05+00:00",
+      "text": "https://t.co/Vg4rY96n9X",
+      "url": "https://x.com/alexxgrowth/status/2057956944359661620",
+      "views": 123313,
+      "likes": 220,
+      "replies": 9,
+      "retweets": 10,
+      "bookmarks": 850,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2022322613947678727",
+      "date": "2026-02-13T14:50:58+00:00",
+      "text": "one of my clippers made $45,429 in a week from content arbitrage\n\nthis is the easiest business model ever\n\nkids are making thousands a day (he's 16)\n\nwant the breakdown? deleting in 24 hours....  \n\nrt & comment “arbitrage” and I’ll dm you a free guide on how to start. (must be following for auto dm)",
+      "url": "https://x.com/alexxgrowth/status/2022322613947678727",
+      "views": 112639,
+      "likes": 1229,
+      "replies": 1068,
+      "retweets": 330,
+      "bookmarks": 751,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1993987398640738566",
+      "date": "2025-11-27T10:16:56+00:00",
+      "text": "tweeting about \"validating\" your app while having zero distribution shows exactly why you remain an indie hacker...\n\nthis mf would already be at $50k/mo if he stopped coding features\n\nand actually built a distribution system\n\nmost founders think \"launching\" means posting a thread on X\n\nand then wonder why they have 0 users after the first 24 hours\n\nit doesn't work because nobody cares about your AI wrapper until they see it 50 times\n\nyou need to force the algorithm to care\n\nif i was running this operation, i wouldn't write a single line of code today\n\ni would deploy a content sweatshop\n\nsolutions that actually work:\n\n-> don't post \"hiring\" ads\n-> go to existing clipping servers\n-> look at the #leaderboard channel\n-> poach the top 10 \"Gold\" ranked creators\n-> they are already proven killers\n-> offer them $1 per 1k views to switch teams\n\nboom thats it lmao\n\nthe \"3-day\" protocol\n\nforce them to create 200 fresh accounts\n\nbut do NOT let them post immediately\n\nmost people mess this up\n\nif a new account posts instantly, tiktok marks it as a bot\n\n they need to scroll for 45 mins/day for 3 days and like content relevant to their niche\n\nyou also need to find an angle that converts\n\nfor example, sell \"toxic productivity\"\n\n\"POV: Your boss just fired you for using ChatGPT\"\n\n(video of sad office worker)\n\n\"But then you found Disparity and learned how to outsmart him\"\n\n(screen recording of the prompt library)\n\nthere is no corporate worker seeing that and not downloading\n\nit taps into their fear of being replaced\n\nthe economics: \n\n-> we have 100,000+ creators in our network\n-> we deploy the top 1% for launches\n\npaid ads for AI apps = $40 CPM (saturated)\n\nteenager arbitrage = <$0.50 CPM (performance based)\n\nyou don't pay for the videos\n\nyou pay for the views\n\nif they flop, you pay $0\n\nif they hit, you print cash\n\nthis is how you actually \"validate\" an app in 2025\n\nif you’re an app owner and you want access to my teenagers (pause), message me",
+      "url": "https://x.com/alexxgrowth/status/1993987398640738566",
+      "views": 111072,
+      "likes": 634,
+      "replies": 39,
+      "retweets": 18,
+      "bookmarks": 1206,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2048114487241183299",
+      "date": "2026-04-25T18:58:40+00:00",
+      "text": "mf delete this",
+      "url": "https://x.com/alexxgrowth/status/2048114487241183299",
+      "views": 110105,
+      "likes": 467,
+      "replies": 8,
+      "retweets": 30,
+      "bookmarks": 781,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2037653188380140023",
+      "date": "2026-03-27T22:09:12+00:00",
+      "text": "BREAKING: i'm officially opening the $0 to $10k challenge to 500 people\n\ni'll be teaching you guys how to get to $10k within 30 days through clipping for FREE\n\nevery participant gets:\n\n-> daily coaching calls with our coaches\n-> early access to the best live campaigns\n-> real payouts tracked automatically through CR\n\nthe rewards:\n\n-> first to $10k wins a Rolex\n-> milestones along the way with cash bonuses and merch\n-> everyone who completes all 30 days gets merch, a 1 on 1 strategy call, and a cash bonus\n\n500 spots. when they're gone cohort 2 won't open until cohort 1 finishes.\n\napply here → https://t.co/KLodORKBhj",
+      "url": "https://x.com/alexxgrowth/status/2037653188380140023",
+      "views": 102091,
+      "likes": 297,
+      "replies": 46,
+      "retweets": 46,
+      "bookmarks": 155,
+      "classification": "tactical_list"
+    },
+    {
+      "id": "1962245829210611844",
+      "date": "2025-08-31T20:07:17+00:00",
+      "text": "I made $58,234 in August 2025.\n\n👻 Virality — $49,492\n₿ Crypto — $4,742\n🧑‍🏫 Consultation — $4,000\n\n→ It's my highest revenue in the past 2 years",
+      "url": "https://x.com/alexxgrowth/status/1962245829210611844",
+      "views": 100283,
+      "likes": 396,
+      "replies": 19,
+      "retweets": 4,
+      "bookmarks": 195,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1959073107723124808",
+      "date": "2025-08-23T02:00:01+00:00",
+      "text": "found a glitch in every platform that allows my clippers to get 9x more views\n\nit's so autistic you wouldn't believe it:\n\nbio updates trigger HUGE algorithmic boosts\n\nnot profile changes. micro-updates.\n\nhere's what happened:\n\ncreator changed one word in bio\nnext post got 10x views\n\ntested it 16 times with in-house creators\n\nCONFIRMED.\n\nthe pattern:\n\nupdate bio → post within 4 minutes → massive boost\n\nwhy?\n\nplatforms think you're \"active\"\nthey reward active users\neven if activity is just bio editing\n\nbut here's the exploit:\n\nwe systemized bio updates LMFAO\n\nevery creator changes bio \nright before posting\n4-minute window\n\nGUARANTEED boost\n\nthe changes can even be invisible:\n\n- extra space\n- emoji skin tone\n- punctuation mark\n\nhuman eye can't see it\nalgorithm can\n\ntested across 10k campaign posts:\n\nposts with bio update: 160k  average views\nposts without: 1.9k average views\n\n80x difference\n80x upgrade\n80x virality\n\nfrom changing a period to a comma 😂\n\nyour competitor spends $100k on ads\n\ngay\n\nwe change punctuation and go VIRAL\n\nthe platform thinks we're all \"power users\"\nconstantly updating\nconstantly improving\n\nreally we just found the cheapest hack:\n\nchange nothing\nbut change it constantly\n\nalgorithms are dumb. they count actions not value\n\nso we give them actions\n\nmeaningless ones\nthat create meaningful results\n\nour ghost creators make our clients go viral because of our awesome systems\n\ncomment \"VIRALITY\" and i'll send you the playbook on how you can do blow your brand up organically",
+      "url": "https://x.com/alexxgrowth/status/1959073107723124808",
+      "views": 85903,
+      "likes": 695,
+      "replies": 220,
+      "retweets": 18,
+      "bookmarks": 1052,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1950984701117649213",
+      "date": "2025-07-31T18:19:34+00:00",
+      "text": "I made $28,732 in July 2025.\n\n👻 Virality - $28.7k",
+      "url": "https://x.com/alexxgrowth/status/1950984701117649213",
+      "views": 83338,
+      "likes": 34,
+      "replies": 6,
+      "retweets": 0,
+      "bookmarks": 12,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2062207141809914115",
+      "date": "2026-06-03T16:17:51+00:00",
+      "text": "dua lipa just launched a $15,000 campaign on Content Rewards\n\npromoting her new album that dropped 10 days ago\n\nthis says a lot about how the music industry operates now\n\nback in the days radios and MTV decided which music became popular\n\nnow one 12 second viral tiktok can put an artist on the global stage\n\n1 dance trend, 1 concert moment, 1 edit, 1 relatable viral lyric clip\n\nsuddenly millions of people are posting the music all own their own\n\nthis campaign is around clipping the launch live concert of her album\n\nwhich is ultimate viral content\n\nthese videos will get millions and millions of views\n\nand she will only have to pay max $750 for each, if only they meet the view threshold\n\nhigh cpms and high max payouts motivate a lot of people to join the campaign\n\nbut then it benefits the artist later on when winners pull in 20-30 million views on a single video\n\nthese videos create a chain reaction of hype around her music\n\n> 1 clip goes viral \n> thousands of people discovered the song \n> spotify streams level up \n> people save it to their playlist \n> algorithm pushes it \n> other people naturally start making content w/ it \n> and more and more clips get produced\n\njust from this one campaign's effect\n\nthat's why if you're an artist who is launching a new album or song\n\nContent Rewards is the perfect platform for you to ensure virality around your launch",
+      "url": "https://x.com/alexxgrowth/status/2062207141809914115",
+      "views": 82689,
+      "likes": 156,
+      "replies": 18,
+      "retweets": 11,
+      "bookmarks": 122,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2028596569461735771",
+      "date": "2026-03-02T22:21:26+00:00",
+      "text": "WTF",
+      "url": "https://x.com/alexxgrowth/status/2028596569461735771",
+      "views": 79952,
+      "likes": 367,
+      "replies": 3,
+      "retweets": 19,
+      "bookmarks": 675,
+      "classification": "observation_or_update"
+    }
+  ],
+  "top_by_likes": [
+    {
+      "id": "1957850046000414917",
+      "date": "2025-08-19T17:00:00+00:00",
+      "text": "okay interesting discovery:\n\nif 17 creators post identical content within 3 minutes\nthe algorithm thinks it's \"breaking news\"\npushes everything to trending\n\ntested this 32 times with a few in-house ghost creators\nALWAYS works\n\nmanufacturing news > reporting news",
+      "url": "https://x.com/alexxgrowth/status/1957850046000414917",
+      "views": 305812,
+      "likes": 4983,
+      "replies": 95,
+      "retweets": 156,
+      "bookmarks": 2165,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2073040719128801645",
+      "date": "2026-07-03T13:46:37+00:00",
+      "text": "I JUST SOLD MY COMPANY AT 16 YEARS OLD\n\nwords can not describe how i feel rn\n\nwe exited for 7-figures. virality did $3M+ in revenue in 10 months, fully bootstrapped\n\nthis is the full story of how it all started and ended, but first I need to be honest:\n\nmy name isn’t alex, its yanal. as of today i’m one of the youngest self made millionaires in the world\n\nbut it wasn’t like this a few years ago. when i was 14 i realized i wanted to build something awesome (and make a lot of money doing so)\n\ni found my cofounder Ivelin because one of his affiliates was posting on TikTok about a make money server. i joined as a regular member, nothing special. when he reopened the affiliate program I jumped in and my first video did 3M views.\n\nthat got me promoted to manager. a while later I pitched him on starting a clipping agency together. that agency became Virality.\n\nwe met Matt on discord around the time he got a job offer at Whop to be their head of clipping\n\ni told him not to go, and to start Virality with me. he said yes\n\nwe’re three teenagers who met on the internet, zero funding, zero connections. and in under a year we built something worth acquiring.\n\nand it has been the most FUN time of my life\n\nwe’ve been on the wall street journal, got in contact with the whitehouse, ran content for BILLIONAIRES, pissed off tjr, worked with tjr, have made todays news dozens of times, and our content has been seen by 300B+ people\n\nVirality is in great hands with .@ninja_reach and will keep helping creators and brands win.\n\nas for us, we're going all in on Content Rewards, the platform Virality itself runs on. we built one agency on top of it. now we're building what every agency in this space runs on.\n\nshoutouts to my cofounders, close friends and partners:\n\n@waliet took a shot on a random affiliate with one viral video and let me pitch him a whole company. mentored me from day one. nobody understands this industry like him.\n\n@organicbond could've been our biggest competitor. Instead he became the best CGO I know and the hardest worker on the team.\n\n@facelessfarms for being our head director and one of the best marketers i’ve ever worked with. this guy is amazing.\n\n@danvsi for picking us up to build content rewards with him. none of this would be possible without his influence\n\n@itspairaw for helping us with our twitter content early on and later on during the transition. hands down the best marketer on twitter.\n\nand most importantly: thank ALL of you for following me and supporting me\n\nstay in touch, content rewards has some massive updates coming soon\n\nand i can NOT wait to share them with you",
+      "url": "https://x.com/alexxgrowth/status/2073040719128801645",
+      "views": 704997,
+      "likes": 2772,
+      "replies": 410,
+      "retweets": 109,
+      "bookmarks": 1781,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2033968029969825910",
+      "date": "2026-03-17T18:05:42+00:00",
+      "text": "me realizing people spend 5 years in university when they could have just read this article and made $10,000 a week https://t.co/WjhB9fy7EY",
+      "url": "https://x.com/alexxgrowth/status/2033968029969825910",
+      "views": 459432,
+      "likes": 2412,
+      "replies": 18,
+      "retweets": 200,
+      "bookmarks": 4178,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2056028719379001615",
+      "date": "2026-05-17T15:07:00+00:00",
+      "text": "all the most successful startups are all doing this rn\n\nthey have multiple accounts where they all post different formats, different content, and post them consistently\n\npush out 20 to 30 videos a day, if you post 300 to 1,000 videos a month\n\nthere is no way that you are not going to succeed…\n\nbut doing that all by yourself is basically trying to push a 50-pound boulder up a mountain\n\nthe short cut loop to that is Content Rewards\n\non Content Rewards, you can launch a campaign, put a budget\n\nsuddenly overnight, you have 30+ accounts with your app's branding that are consistently posting for your brand because they want to earn the campaign money\n\nyou can specify a viral format, and put them in a drive and get them to your creators\n\ncreators will multiply the viral format and post 20, 30, even 50 times a day\n\nand all of this is before you even spend a dollar\n\nyou only pay clippers/creators when they generate views for you\n\n$0.12 cents to $1 cpm on verified views only\n\nthat's exactly how we're getting brands super bowl level views in such short time and spend",
+      "url": "https://x.com/alexxgrowth/status/2056028719379001615",
+      "views": 415088,
+      "likes": 1788,
+      "replies": 53,
+      "retweets": 94,
+      "bookmarks": 3288,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1957844726750552146",
+      "date": "2025-08-19T16:38:52+00:00",
+      "text": "i'm 15 and i just got wired $1M to manage a clients clipping campaign\n\nask me anything",
+      "url": "https://x.com/alexxgrowth/status/1957844726750552146",
+      "views": 274695,
+      "likes": 1542,
+      "replies": 184,
+      "retweets": 15,
+      "bookmarks": 581,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2068352338268750162",
+      "date": "2026-06-20T15:16:40+00:00",
+      "text": "https://t.co/fWHuJ4VrxU",
+      "url": "https://x.com/alexxgrowth/status/2068352338268750162",
+      "views": 1212786,
+      "likes": 1438,
+      "replies": 118,
+      "retweets": 179,
+      "bookmarks": 5075,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2023824849073021389",
+      "date": "2026-02-17T18:20:19+00:00",
+      "text": "people will ignore this, then wonder why they haven't hit their new years resolutions",
+      "url": "https://x.com/alexxgrowth/status/2023824849073021389",
+      "views": 317027,
+      "likes": 1231,
+      "replies": 7,
+      "retweets": 68,
+      "bookmarks": 2249,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2022322613947678727",
+      "date": "2026-02-13T14:50:58+00:00",
+      "text": "one of my clippers made $45,429 in a week from content arbitrage\n\nthis is the easiest business model ever\n\nkids are making thousands a day (he's 16)\n\nwant the breakdown? deleting in 24 hours....  \n\nrt & comment “arbitrage” and I’ll dm you a free guide on how to start. (must be following for auto dm)",
+      "url": "https://x.com/alexxgrowth/status/2022322613947678727",
+      "views": 112639,
+      "likes": 1229,
+      "replies": 1068,
+      "retweets": 330,
+      "bookmarks": 751,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1992901388876107865",
+      "date": "2025-11-24T10:21:32+00:00",
+      "text": ".@brezscales  is a scammer and doesn't pay his creators\n\nhes $500k+ in debt to his clippers and doesn't plan on paying them back\n\nhow the fuck could .@whop  let this happen?\n\nbrez is using whops lack of quality control to \"pump and dump\" clipping campaigns\n\nlets say you made a video that got 1,500,000 views at a $1 CPM\n\nbrez now owes you $1.5k\n\nyou submit your clip for payouts\n\nbut instead of paying you\nbrez ENDS THE CAMPAIGN\n\nso now you haven't been compensated for the millions of views you've generated\n\nthis isn't just a random unlucky timing thing\n\nthis has happened to dozens of clippers that brez is working with\n\nin the screenshot below, you can see his campaign manager share a dashboard of his CPM\n\n$0.32/1k views\n\nbut wait\n\nAREN'T YOU PAYING THEM$ $1-$1.5 PER 1K VIEWS?\n\nbrez is:\n\n1/ starting new campaigns every 2-4 weeks\n2/ waiting for campaigns to get multiple millions of views\n3/ ENDING THE CAMPAIGNS while multiple clippers are waiting for payments of $1k-$50k\n4/ repeat \n\nwhat the fuck?\n\nhow has whop not caught onto this sooner?\n\ni would never ever let this happen in virality\n\nwe only work with quality brands who can actually pay and we're always transparent with the budget\n\nif a budget were to expire and not be renewed for a while, i pay out of pocket to make sure our clippers are fed and our brands are happy\n\nbut what Brez is doing is borderline criminal\n\nactually IT IS CRIMINAL\n\nand it's clearly not a mistake because this is happening multiple times\n\ninfact they JUST started another campaign\n\nit's getting out of hand\n\n.@whop .@brezscales  please address this",
+      "url": "https://x.com/alexxgrowth/status/1992901388876107865",
+      "views": 383604,
+      "likes": 876,
+      "replies": 73,
+      "retweets": 25,
+      "bookmarks": 326,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2014796776524435720",
+      "date": "2026-01-23T20:25:59+00:00",
+      "text": "the quit porn app marketing strategy that actually works is kinda unhinged but hear me out\n\nwe started running tiktoks that open with like 2 seconds of an OF girl (nothing explicit obv) then hard cut to goggins screaming about discipline with our app dashboard overlaid\n\ncomments section becomes a warzone. half the people are confused, some are mad, some are joking, and buried in there are the guys genuinely asking what the app is\n\nthe algo doesn't care WHY people comment. it just sees engagement and pushes it further\n\nso yeah we're technically getting reach from people who have zero intention of quitting anything. but that reach is what gets us in front of the 10% who actually need it and will convert\n\ngeneric \"you can do this king\" content gets like 200 views. this stuff does 50k+ consistently\n\nthe game isn't about making content your target audience likes. it's about making content that REACHES your target audience. those are different problems",
+      "url": "https://x.com/alexxgrowth/status/2014796776524435720",
+      "views": 67601,
+      "likes": 831,
+      "replies": 20,
+      "retweets": 17,
+      "bookmarks": 914,
+      "classification": "teaching"
+    },
+    {
+      "id": "2031950798658097516",
+      "date": "2026-03-12T04:29:56+00:00",
+      "text": "a lot of people have been telling me clipping is a scam\n\nSOO i'm putting myself in a 30 day challenge to prove that ANYONE can make $10k/mo in 30 days\n\nthe rules:\n\n- starting with $0\n- fresh Content Rewards account\n- no special access. same tools anybody gets on day 1\n\nthe whole point is to show that if the CEO of a clipping company can do this w/ the same tools you have access to, there's nothing stopping you from doing it too\n\nthe goal: \n\n$10,000 in 30 days - enough to buy a Rolex in cash\n\nif i hit it, i buy it and give it to one of my followers here\n\nif i don’t i do a face reveal and give whatever money i made to israel\n\neverything will be journaled daily on X\n\nevery clip, every dollar i make, every new thing i learn\n\nand then you'll see what happens when the compounding kicks in\n\nday 1 starts tomorrow\n\nfollow + rt if you wanna stay tuned :)",
+      "url": "https://x.com/alexxgrowth/status/2031950798658097516",
+      "views": 183979,
+      "likes": 754,
+      "replies": 53,
+      "retweets": 79,
+      "bookmarks": 783,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1999071912928907471",
+      "date": "2025-12-11T11:00:59+00:00",
+      "text": "stop laughing at the \"slide 4\" ad strategy...\n\nyou are getting cooked by 16 year olds using canva\n\nmost people see this image and think \"cringe\" or \"deceptive\"\n\nwrong.\n\nthis is the single highest ROI format on TikTok right now because it completely bypasses \"Ad Blindness\"\n\nusers have trained their brains to scroll past anything that looks like high production marketing\n\nbut they stop for \"Aesthetic\"\n\nwe deployed this exact strategy for a mobile app client (can't name them due to NDA)\n\nswitched from UGC videos to \"Pinterest Slideshows\" targeting female creators\n\nresult: 6x revenue growth in 30 days\n\nhere is the actual sauce on how to run this:\n\n1. The \"Bait\" (Slides 1-3)\n\ndo NOT film content.\ngo to Pinterest.\nsearch specific aesthetic terms: \"old money,\" \"clean girl,\" \"that girl vibe.\"\ndownload 3 images.\n\nthis acts as a demographic filter.\nif someone stops for \"luxury hotel\" pics, they likely have disposable income.\nyou are targeting via *content*, not *settings*.\n\n2. The \"Value\" Trap\n\nslides 1-3 need to be generic dopamine.\n\"playlists for studying,\" \"how to fix posture,\" \"morning routine.\"\nget them nodding.\nget them to trust the carousel.\n\n3. The \"Gatekeep\" Frame (Slide 4)\n\nthis is where everyone messes up.\ndo NOT put a big \"DOWNLOAD NOW\" button.\n\nframe the product as a \"secret\" or a \"habit.\"\nlook at the image: \"habits i wish i knew sooner.\"\n\npsychologically, the user feels like they *discovered* a secret code\ninstead of being sold a product\n\n4. The Volume\n\na video ad takes 4 hours to film and edit.\na slideshow takes 4 minutes to assemble.\n\nwe have teenagers churning out 50 of these a day.\ncost is $0.\nif one flops? who cares.\nif one hits? it prints.\n\nthe difference between \"burning cash\" and \"printing\":\n\nStandard Ads: $20 CPM, user sees \"Sponsored\", scrolls instantly.\n\nPinterest Slides: $2 CPM, user saves the post for the \"aesthetic\", downloads the app.\n\nif you want access to my army of 25,000+ teenagers that post slideshows like this\n\ndm me.",
+      "url": "https://x.com/alexxgrowth/status/1999071912928907471",
+      "views": 73819,
+      "likes": 735,
+      "replies": 21,
+      "retweets": 42,
+      "bookmarks": 1198,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2028229291020873735",
+      "date": "2026-03-01T22:02:00+00:00",
+      "text": "how to make get rich off of ROBLOX:  \n\n1/ find a brainrotted niche \n2/ ask chatgpt for enjoyable gameplay loops\n3/ hire and fire a dev to do it for $10-$20 \n4/ use content rewards to market it \n5/ add pay to win gamepasses for 99-999 robux \n6/ profit $100k/mo minimum https://t.co/JuHOKYt80D",
+      "url": "https://x.com/alexxgrowth/status/2028229291020873735",
+      "views": 72778,
+      "likes": 695,
+      "replies": 19,
+      "retweets": 32,
+      "bookmarks": 740,
+      "classification": "teaching"
+    },
+    {
+      "id": "1959073107723124808",
+      "date": "2025-08-23T02:00:01+00:00",
+      "text": "found a glitch in every platform that allows my clippers to get 9x more views\n\nit's so autistic you wouldn't believe it:\n\nbio updates trigger HUGE algorithmic boosts\n\nnot profile changes. micro-updates.\n\nhere's what happened:\n\ncreator changed one word in bio\nnext post got 10x views\n\ntested it 16 times with in-house creators\n\nCONFIRMED.\n\nthe pattern:\n\nupdate bio → post within 4 minutes → massive boost\n\nwhy?\n\nplatforms think you're \"active\"\nthey reward active users\neven if activity is just bio editing\n\nbut here's the exploit:\n\nwe systemized bio updates LMFAO\n\nevery creator changes bio \nright before posting\n4-minute window\n\nGUARANTEED boost\n\nthe changes can even be invisible:\n\n- extra space\n- emoji skin tone\n- punctuation mark\n\nhuman eye can't see it\nalgorithm can\n\ntested across 10k campaign posts:\n\nposts with bio update: 160k  average views\nposts without: 1.9k average views\n\n80x difference\n80x upgrade\n80x virality\n\nfrom changing a period to a comma 😂\n\nyour competitor spends $100k on ads\n\ngay\n\nwe change punctuation and go VIRAL\n\nthe platform thinks we're all \"power users\"\nconstantly updating\nconstantly improving\n\nreally we just found the cheapest hack:\n\nchange nothing\nbut change it constantly\n\nalgorithms are dumb. they count actions not value\n\nso we give them actions\n\nmeaningless ones\nthat create meaningful results\n\nour ghost creators make our clients go viral because of our awesome systems\n\ncomment \"VIRALITY\" and i'll send you the playbook on how you can do blow your brand up organically",
+      "url": "https://x.com/alexxgrowth/status/1959073107723124808",
+      "views": 85903,
+      "likes": 695,
+      "replies": 220,
+      "retweets": 18,
+      "bookmarks": 1052,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1993987398640738566",
+      "date": "2025-11-27T10:16:56+00:00",
+      "text": "tweeting about \"validating\" your app while having zero distribution shows exactly why you remain an indie hacker...\n\nthis mf would already be at $50k/mo if he stopped coding features\n\nand actually built a distribution system\n\nmost founders think \"launching\" means posting a thread on X\n\nand then wonder why they have 0 users after the first 24 hours\n\nit doesn't work because nobody cares about your AI wrapper until they see it 50 times\n\nyou need to force the algorithm to care\n\nif i was running this operation, i wouldn't write a single line of code today\n\ni would deploy a content sweatshop\n\nsolutions that actually work:\n\n-> don't post \"hiring\" ads\n-> go to existing clipping servers\n-> look at the #leaderboard channel\n-> poach the top 10 \"Gold\" ranked creators\n-> they are already proven killers\n-> offer them $1 per 1k views to switch teams\n\nboom thats it lmao\n\nthe \"3-day\" protocol\n\nforce them to create 200 fresh accounts\n\nbut do NOT let them post immediately\n\nmost people mess this up\n\nif a new account posts instantly, tiktok marks it as a bot\n\n they need to scroll for 45 mins/day for 3 days and like content relevant to their niche\n\nyou also need to find an angle that converts\n\nfor example, sell \"toxic productivity\"\n\n\"POV: Your boss just fired you for using ChatGPT\"\n\n(video of sad office worker)\n\n\"But then you found Disparity and learned how to outsmart him\"\n\n(screen recording of the prompt library)\n\nthere is no corporate worker seeing that and not downloading\n\nit taps into their fear of being replaced\n\nthe economics: \n\n-> we have 100,000+ creators in our network\n-> we deploy the top 1% for launches\n\npaid ads for AI apps = $40 CPM (saturated)\n\nteenager arbitrage = <$0.50 CPM (performance based)\n\nyou don't pay for the videos\n\nyou pay for the views\n\nif they flop, you pay $0\n\nif they hit, you print cash\n\nthis is how you actually \"validate\" an app in 2025\n\nif you’re an app owner and you want access to my teenagers (pause), message me",
+      "url": "https://x.com/alexxgrowth/status/1993987398640738566",
+      "views": 111072,
+      "likes": 634,
+      "replies": 39,
+      "retweets": 18,
+      "bookmarks": 1206,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2037872331578589677",
+      "date": "2026-03-28T12:40:00+00:00",
+      "text": "Absouloutly fucked that this is shared for $0. https://t.co/ULWzfz0bLy",
+      "url": "https://x.com/alexxgrowth/status/2037872331578589677",
+      "views": 143104,
+      "likes": 598,
+      "replies": 6,
+      "retweets": 37,
+      "bookmarks": 1282,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "1994482791371756026",
+      "date": "2025-11-28T19:05:27+00:00",
+      "text": "people calling her \"mid\" while she prints $4M a month are missing the entire point of the internet right now.\n\nshe didn't need to be a 10/10. she just needed to be \"clippable.\n\nthe funniest part is she didn't even hire an agency\n\nshe accidentally built a decentralized media company because 50,000 random kids realized they could farm views by reposting her content\n\nshe pretty much became a \"raw asset\" for the algorithm.\n\nevery time she stands still in a spider-man costume, thousands of editors download the footage, add their own caption (\"me waiting for him to text back\"), and flood TikTok & IG.\n\nbut here is where she is leaving money on the table:\n\nright now, she relies on \"simp luck.\"\n\nif the trend dies, her distribution dies.\n\nif i was managing her, i would stop relying on randoms and actually hire the top 100 editors to run official burner accounts\n\nlock them into a contract\n\ngive them exclusive footage\n\nit'd force the trend to stay alive for 5 years instead of 5 months\n\nthese organic waves are great but you NEED ghost creators to have predictable inputs and outputs\n\nif you have a personal brand and you aren't recruiting your own fans to distribute your content...\n\nyou are literally hoping for a lottery ticket when you could just build a machine.\n\nif you want access to the 100,000+ teenage creators i manage, DM me and i'll get back to you",
+      "url": "https://x.com/alexxgrowth/status/1994482791371756026",
+      "views": 226369,
+      "likes": 542,
+      "replies": 32,
+      "retweets": 11,
+      "bookmarks": 652,
+      "classification": "story_or_origin"
+    },
+    {
+      "id": "1975301213227737114",
+      "date": "2025-10-06T20:44:43+00:00",
+      "text": "everyone thinks going viral is random luck\n\ni figured out it couldn't be further from the truth\n\ni tracked 12,500 clips in our influencer campaigns to find the pattern\n\nit's all in the time\n\nclips posted at :00 past the hour:\n98k average views\n\nclips posted at :17 past the hour: \n2.3M average views\n\nclips posted at :00 past the hour: \n98k average views\n\n17 minutes past beats on-the-hour by 23x\n\nhere's why this happens:\n\nplatforms refresh caches at :15\nthe whole thing takes 2 minutes to propagate\n\nso :17 catches fresh algorithm state\n\nlike surfers waiting for the perfect wave\nexcept the wave comes every hour\nat EXACTLY :17 seconds\n\nso i tested this across all platforms:\n\n- tiktok :17 - confirmed\n- instagram :17 - confirmed  \n- youtube :16.9 - confirmed\n\nnice\n\nit's UNIVERSAL\n\nbut then i did something crazy:\n\ni restructured our entire operation:\n\nadded the \"17 minute rule\" to our clipper rulebook\n\nnow we have 100,000 clippers synchronized\nall posting at :17 and :32\nevery hour, 24/7\n\nEVERY SINGLE post we make hits the sweet spot like a very effective algo orgasm\n\nyou're posting meh when convenient\n\nwe're posting gold when optimal\n\nthat's why virality ghost creators stay on top\n\ncomment \"VIRAL\" and i'll send you the guide on how to get 3M+ views in 30 days with ghost content",
+      "url": "https://x.com/alexxgrowth/status/1975301213227737114",
+      "views": 55396,
+      "likes": 520,
+      "replies": 169,
+      "retweets": 17,
+      "bookmarks": 932,
+      "classification": "tactical_list"
+    },
+    {
+      "id": "2023162500267594079",
+      "date": "2026-02-15T22:28:23+00:00",
+      "text": "https://t.co/BxROu5DLes",
+      "url": "https://x.com/alexxgrowth/status/2023162500267594079",
+      "views": 39419,
+      "likes": 501,
+      "replies": 9,
+      "retweets": 25,
+      "bookmarks": 1066,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "1970847940823400467",
+      "date": "2025-09-24T13:49:00+00:00",
+      "text": "autistic content hack:\n\nsharing YOUR LOSSES makes more money than sharing wins\n\ni told my clippers to post two identical product launches:\n\nversion A:\n\"made $100k this month!\"\n\nversion B:\n\"lost $30k but learned this...\"\n\nversion A:\n123k views, 13 sales\n\nversion B:\n5.4M views, 1450 sales\n\nlosing stories convert 49x better\n\nhere's the psychology:\n\nwinners create distance\n\nbut losers create connection\n\npeople don't trust perfection\nthey trust STRUGGLE\n\nso now every campaign starts with failure:\n\n\"spent $10k on ads that flopped\"\n\"porn addiction made my wife leave”\n\"this almost bankrupted me\"\n\nthen pivot to solution\n\nthe vulnerability ladder:\n\n1. admit failure\n2. show specific numbers\n3. explain the lesson\n4. soft pitch solution\n\ni trained 21,000 clippers to lead with Ls for most campaigns\n\nreal or invented\nDOESN’T MATTER\n\nbecause you're flexing success\nand we’re flexing failure\n\nsuccess isolates\nfailure RESONATES\n\nresonation = $$$$$$$$$$$$$$$\n\ncomment \"VIRAL\" and i’ll send you my ghost content playbook that will generate you 3M organic views in 30d",
+      "url": "https://x.com/alexxgrowth/status/1970847940823400467",
+      "views": 33551,
+      "likes": 483,
+      "replies": 80,
+      "retweets": 21,
+      "bookmarks": 593,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2048114487241183299",
+      "date": "2026-04-25T18:58:40+00:00",
+      "text": "mf delete this",
+      "url": "https://x.com/alexxgrowth/status/2048114487241183299",
+      "views": 110105,
+      "likes": 467,
+      "replies": 8,
+      "retweets": 30,
+      "bookmarks": 781,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "1959027808044196263",
+      "date": "2025-08-22T23:00:01+00:00",
+      "text": "okay i haven't tested this myself yet\n\nbut i figured out how to crash any restaurant's stock using 5,000 food tiktokers\n\n(never doing this but someone will)\n\nstep 1: short the stock, buy puts on chipotle\n\nstep 2: 5,000 creators post \"got food poisoning from chipotle\"\n\nstep 3: fake receipts, fake hospital bands, fake evidence \n\nstep 4: news picks up \"viral food poisoning trend\" \n\nstep 5: stock drops 40% from reputation crisis \n\nstep 6: puts print money\n\ntimeline: \n72 hours from activation to stock crash \n\ncost: \n$20k-$200k for creator payments\n\nreturn: \n$10M+ from options\n\nthe beautiful part: \nimpossible to prove coordination ❤️‍🩹\n\ncreators just \"happened\" to get sick same week algorithm \"randomly\" pushed the content \n\nSEC can't prosecute viral content LOL\n\na client offered us 5-figures to run a similar play but i said no because i'm not insane\n\nbut someone else will figure this out \nprobably already happening\nto a brand near you\n\nthis is why i stick to making apps/products/brands go viral \n\nmuch less illegal\n\nwhen 5,000 people say your food sucks... \n\nreality becomes negotiable\n\nand when 5,000 people are telling tiktok how amazing and helpful your brand is...\n\nreality becomes virality",
+      "url": "https://x.com/alexxgrowth/status/1959027808044196263",
+      "views": 175071,
+      "likes": 467,
+      "replies": 69,
+      "retweets": 8,
+      "bookmarks": 290,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2037035092992733624",
+      "date": "2026-03-26T05:13:07+00:00",
+      "text": "DAY 1 UPDATE (we're cooking, wtf?)\n\nso yesterday i posted 21 videos across 1.5 days on a completely fresh account. i had zero followers, and i did zero warmup.\n\ni got a whopping 390k+ views. 20 out of 21 submissions approved. 450 followers from absolute zero.\n\n$80 made\n\nthe campaign i picked was a logo campaign. the concept is simple, i find cheating videos that are already getting views organically, add a branded watermark to them, throw a link in bio, and submit that thang\n\nnow here's what actually surprised me. everyone in this space talks about account warmup like it's gospel. post 3 videos a day for 2 weeks, don't submit anything, let the algorithm learn your content before you monetize. i ignored all of that completely. posted 21 videos in a day and a half straight to a brand new account and the algorithm didn't punish me once. 35 approvals\n\nmy theory: warmup advice exists because people post mediocre content and blame the algorithm. if the video is actually good the algorithm pushes it regardless of account age. the account being new might even help because there's no bad history to work against you.\n\nwhat i'm doing next: opening 2 more accounts this week. each one gets a completely different campaign niche. the whole point is to let the data pick the winner instead of me guessing. round 1 i bought an account, picked a niche i thought would work, and forced it. that's why it failed. round 2 i'm running multiple niches simultaneously and killing the ones that don't respond by day 7.\n\n$10k in 30 days. the same tools and same platform every creator gets on day 1.\n\nremember,\n\nif i fail, i'll face reveal on social media and donate all my earnings to tel aviv \n\nif i succeed, i will give a rolex to one of you\n\nfollow if you want to see what the data says by the end of the week : )",
+      "url": "https://x.com/alexxgrowth/status/2037035092992733624",
+      "views": 60774,
+      "likes": 459,
+      "replies": 43,
+      "retweets": 24,
+      "bookmarks": 642,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2033638447177519257",
+      "date": "2026-03-16T20:16:03+00:00",
+      "text": "https://t.co/KzTsIK9UdV",
+      "url": "https://x.com/alexxgrowth/status/2033638447177519257",
+      "views": 263490,
+      "likes": 451,
+      "replies": 6,
+      "retweets": 24,
+      "bookmarks": 1513,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "1988650146104533488",
+      "date": "2025-11-12T16:48:36+00:00",
+      "text": "i'm 16 and i generated $51,453 for a client from ONE TikTok video\n\nit happened by just reverse-engineering exactly what's already going viral\n\nhere's the process i used to find winning formats in any niche:\n\nstep 1: save 50-100 viral videos\n\nbut don't just scroll and like\n\nyou gotta actually save them to a collection\n\nrequirements:\n\n100k+ views minimum\nposted in last 30 days (formats die fast)\nin your niche or adjacent niches\nshows product naturally (not direct ads)\nspend 2-3 hours doing this\n\nyes it's boring but who cares lmao\n\nyou're building a database of what actually works right now\n\nstep 2: analyze patterns in a spreadsheet\n\nfor each video, document:\n\nexact hook (first 3 seconds of text/audio)\n\ncontent format (slideshow, talking head, POV, screen recording)\nwhere product appears (which slide/second)\nvideo length\nscene change frequency\naudio type (trending sound, original, voiceover)\ncomment themes (what are people asking?)\nafter 50 videos you'll start seeing patterns\n\ncertain hooks appear repeatedly\n\ncertain formats dominate\n\ncertain psychological triggers work consistently\n\nstep 3: the AIDA breakdown\n\nevery viral video follows the same structure\n\nAttention (0-3 seconds): pattern interrupt\n\nhook must do 3 things:\n\nstop the scroll with unexpected visual/text\nqualify the audience (signal who this is for)\ncreate open loop (promise something unresolved)\nstrong hook patterns we see:\n\n\"the reason you're still [pain point]...\" \"how I [achieved result] in [timeframe]\" \"this [thing] is banned in [place] because...\" \"[number] people tried this [thing] and...\"\n\nInterest (3-8 seconds): context bridge\ngive just enough background to make the payoff meaningful\nNOT the full explanation\nminimum viable context\n\nexample for a productivity app:\n\n\"after trying 12 different apps, I found one that actually syncs across devices without crashing\"\n\nthat's enough context\n\nyou don't need the full story yet\n\nDesire (8-25 seconds): value delivery\n\nthis is where you actually teach/entertain\n\nproduct appears naturally as a tool, not the focus\n\nif you promised \"how I organize my day\"\n\nshow the actual process\n\nand the app appears in slide 3-4 as part of that process\n\nviewers think \"oh that's how they do it\"\n\nnot \"oh this is an ad\"\n\nyou'll quickly notice this pattern in all viral + high cvr videos\n\nAction (final 3 seconds): soft conversion\n\nno hard CTAs like \"download now\"\n\ninstead:\n\nshow results: \"saved me 2 hours daily\"\n\nsocial proof: \"12k people use this now\"\n\naddress objection: \"works on both iPhone and Android\"\n\nstep 4: hook formula extraction\n\nfrom your 50 videos, extract the hooks\n\ngroup them by pattern:\n\nfear-based: \"you're losing [thing] every [timeframe]\"\n\nhope-based: \"scientists discovered [solution]\"\n\ncuriosity-based: \"this one [action] adds [result]\"\n\nsocial proof: \"[percentage] of people don't know this\"\n\nnow you have a library of proven hooks\n\nmix and match them:\n\n\"79% of people are losing money daily because they don't know this one budgeting trick\"\n\n= social proof + fear + curiosity\n\nstep 5: format validation\n\nbefore committing to any format, validate it:\n\nhas this format generated 2M+ total views in your niche in last 7 days?\n\ndo comments show conversion intent? (asking for product links, expressing interest)\n\ncan this be replicated by average creators? (not just elite talent)\n\nis it platform-agnostic? (works on TikTok AND Instagram)\n\nif yes to all four, it's worth testing\n\nif no to any, keep looking\n\nstep 6: the comment conversion test\n\ncomments reveal everything\n\nscroll through top comments on viral videos\n\nlook for:\n\n\"what app is this?\" = product discovery \"where do I get this?\" = purchase intent\n\"I tried this and it works\" = testimonials \"seems too good to be true\" = objections\n\nvideos with high views but no product discussion?\n\npure entertainment, not converting\n\nvideos with moderate views but heavy product discussion?\n\ngoldmine - these are the formats to replicate\n\nstep 7: reverse-engineer the winner\n\npick the top performing video in your niche\nwatch it 10 times\n\ndocument:\n\nsecond 0: what visual stopped you?\nsecond 1: what text made you keep watching?\nsecond 3: when did you know what this was about\nsecond 5: when did the product appear?\nsecond 8: what made you want to keep watching?second 15: what kept you from scrolling?\n\nnow recreate that exact structure with your product\n\nnot the same content\n\nthe same STRUCTURE\n\nstep 8: create the content brief\n\nnow document everything for your creators:\n\nhook formulas that tested well\n\nslide-by-slide breakdown with timing\nwhere product appears (never first 3 slides)\naudio guidelines (trending > original > voiceover)\ncall-to-action placement\nthis brief becomes the instruction manual\n\ncommon mistakes:\n\nresearching content YOU like instead of what performs\n\nyour taste doesn't matter at all, if it's going viral then just run it up\n\n+ only looking at massive accounts\n\nthe best formats often start with accounts under 10k followers\n\nyou should be doing this research often & never stay idle on one format\n\nbecause formats die every 3 months\n\nyou NEED to research weekly\n\n60-90 minutes every week watching content, saving examples, updating briefs\n\ni've personally used this exact process for every client\n\ncomment \"REVERSE\" if you want the full guide sent to your dms",
+      "url": "https://x.com/alexxgrowth/status/1988650146104533488",
+      "views": 48348,
+      "likes": 439,
+      "replies": 196,
+      "retweets": 29,
+      "bookmarks": 961,
+      "classification": "result_or_receipt"
+    }
+  ],
+  "top_by_bookmarks": [
+    {
+      "id": "2068352338268750162",
+      "date": "2026-06-20T15:16:40+00:00",
+      "text": "https://t.co/fWHuJ4VrxU",
+      "url": "https://x.com/alexxgrowth/status/2068352338268750162",
+      "views": 1212786,
+      "likes": 1438,
+      "replies": 118,
+      "retweets": 179,
+      "bookmarks": 5075,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2033968029969825910",
+      "date": "2026-03-17T18:05:42+00:00",
+      "text": "me realizing people spend 5 years in university when they could have just read this article and made $10,000 a week https://t.co/WjhB9fy7EY",
+      "url": "https://x.com/alexxgrowth/status/2033968029969825910",
+      "views": 459432,
+      "likes": 2412,
+      "replies": 18,
+      "retweets": 200,
+      "bookmarks": 4178,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2056028719379001615",
+      "date": "2026-05-17T15:07:00+00:00",
+      "text": "all the most successful startups are all doing this rn\n\nthey have multiple accounts where they all post different formats, different content, and post them consistently\n\npush out 20 to 30 videos a day, if you post 300 to 1,000 videos a month\n\nthere is no way that you are not going to succeed…\n\nbut doing that all by yourself is basically trying to push a 50-pound boulder up a mountain\n\nthe short cut loop to that is Content Rewards\n\non Content Rewards, you can launch a campaign, put a budget\n\nsuddenly overnight, you have 30+ accounts with your app's branding that are consistently posting for your brand because they want to earn the campaign money\n\nyou can specify a viral format, and put them in a drive and get them to your creators\n\ncreators will multiply the viral format and post 20, 30, even 50 times a day\n\nand all of this is before you even spend a dollar\n\nyou only pay clippers/creators when they generate views for you\n\n$0.12 cents to $1 cpm on verified views only\n\nthat's exactly how we're getting brands super bowl level views in such short time and spend",
+      "url": "https://x.com/alexxgrowth/status/2056028719379001615",
+      "views": 415088,
+      "likes": 1788,
+      "replies": 53,
+      "retweets": 94,
+      "bookmarks": 3288,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2023824849073021389",
+      "date": "2026-02-17T18:20:19+00:00",
+      "text": "people will ignore this, then wonder why they haven't hit their new years resolutions",
+      "url": "https://x.com/alexxgrowth/status/2023824849073021389",
+      "views": 317027,
+      "likes": 1231,
+      "replies": 7,
+      "retweets": 68,
+      "bookmarks": 2249,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "1957850046000414917",
+      "date": "2025-08-19T17:00:00+00:00",
+      "text": "okay interesting discovery:\n\nif 17 creators post identical content within 3 minutes\nthe algorithm thinks it's \"breaking news\"\npushes everything to trending\n\ntested this 32 times with a few in-house ghost creators\nALWAYS works\n\nmanufacturing news > reporting news",
+      "url": "https://x.com/alexxgrowth/status/1957850046000414917",
+      "views": 305812,
+      "likes": 4983,
+      "replies": 95,
+      "retweets": 156,
+      "bookmarks": 2165,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2073040719128801645",
+      "date": "2026-07-03T13:46:37+00:00",
+      "text": "I JUST SOLD MY COMPANY AT 16 YEARS OLD\n\nwords can not describe how i feel rn\n\nwe exited for 7-figures. virality did $3M+ in revenue in 10 months, fully bootstrapped\n\nthis is the full story of how it all started and ended, but first I need to be honest:\n\nmy name isn’t alex, its yanal. as of today i’m one of the youngest self made millionaires in the world\n\nbut it wasn’t like this a few years ago. when i was 14 i realized i wanted to build something awesome (and make a lot of money doing so)\n\ni found my cofounder Ivelin because one of his affiliates was posting on TikTok about a make money server. i joined as a regular member, nothing special. when he reopened the affiliate program I jumped in and my first video did 3M views.\n\nthat got me promoted to manager. a while later I pitched him on starting a clipping agency together. that agency became Virality.\n\nwe met Matt on discord around the time he got a job offer at Whop to be their head of clipping\n\ni told him not to go, and to start Virality with me. he said yes\n\nwe’re three teenagers who met on the internet, zero funding, zero connections. and in under a year we built something worth acquiring.\n\nand it has been the most FUN time of my life\n\nwe’ve been on the wall street journal, got in contact with the whitehouse, ran content for BILLIONAIRES, pissed off tjr, worked with tjr, have made todays news dozens of times, and our content has been seen by 300B+ people\n\nVirality is in great hands with .@ninja_reach and will keep helping creators and brands win.\n\nas for us, we're going all in on Content Rewards, the platform Virality itself runs on. we built one agency on top of it. now we're building what every agency in this space runs on.\n\nshoutouts to my cofounders, close friends and partners:\n\n@waliet took a shot on a random affiliate with one viral video and let me pitch him a whole company. mentored me from day one. nobody understands this industry like him.\n\n@organicbond could've been our biggest competitor. Instead he became the best CGO I know and the hardest worker on the team.\n\n@facelessfarms for being our head director and one of the best marketers i’ve ever worked with. this guy is amazing.\n\n@danvsi for picking us up to build content rewards with him. none of this would be possible without his influence\n\n@itspairaw for helping us with our twitter content early on and later on during the transition. hands down the best marketer on twitter.\n\nand most importantly: thank ALL of you for following me and supporting me\n\nstay in touch, content rewards has some massive updates coming soon\n\nand i can NOT wait to share them with you",
+      "url": "https://x.com/alexxgrowth/status/2073040719128801645",
+      "views": 704997,
+      "likes": 2772,
+      "replies": 410,
+      "retweets": 109,
+      "bookmarks": 1781,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2033638447177519257",
+      "date": "2026-03-16T20:16:03+00:00",
+      "text": "https://t.co/KzTsIK9UdV",
+      "url": "https://x.com/alexxgrowth/status/2033638447177519257",
+      "views": 263490,
+      "likes": 451,
+      "replies": 6,
+      "retweets": 24,
+      "bookmarks": 1513,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2037872331578589677",
+      "date": "2026-03-28T12:40:00+00:00",
+      "text": "Absouloutly fucked that this is shared for $0. https://t.co/ULWzfz0bLy",
+      "url": "https://x.com/alexxgrowth/status/2037872331578589677",
+      "views": 143104,
+      "likes": 598,
+      "replies": 6,
+      "retweets": 37,
+      "bookmarks": 1282,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "1993987398640738566",
+      "date": "2025-11-27T10:16:56+00:00",
+      "text": "tweeting about \"validating\" your app while having zero distribution shows exactly why you remain an indie hacker...\n\nthis mf would already be at $50k/mo if he stopped coding features\n\nand actually built a distribution system\n\nmost founders think \"launching\" means posting a thread on X\n\nand then wonder why they have 0 users after the first 24 hours\n\nit doesn't work because nobody cares about your AI wrapper until they see it 50 times\n\nyou need to force the algorithm to care\n\nif i was running this operation, i wouldn't write a single line of code today\n\ni would deploy a content sweatshop\n\nsolutions that actually work:\n\n-> don't post \"hiring\" ads\n-> go to existing clipping servers\n-> look at the #leaderboard channel\n-> poach the top 10 \"Gold\" ranked creators\n-> they are already proven killers\n-> offer them $1 per 1k views to switch teams\n\nboom thats it lmao\n\nthe \"3-day\" protocol\n\nforce them to create 200 fresh accounts\n\nbut do NOT let them post immediately\n\nmost people mess this up\n\nif a new account posts instantly, tiktok marks it as a bot\n\n they need to scroll for 45 mins/day for 3 days and like content relevant to their niche\n\nyou also need to find an angle that converts\n\nfor example, sell \"toxic productivity\"\n\n\"POV: Your boss just fired you for using ChatGPT\"\n\n(video of sad office worker)\n\n\"But then you found Disparity and learned how to outsmart him\"\n\n(screen recording of the prompt library)\n\nthere is no corporate worker seeing that and not downloading\n\nit taps into their fear of being replaced\n\nthe economics: \n\n-> we have 100,000+ creators in our network\n-> we deploy the top 1% for launches\n\npaid ads for AI apps = $40 CPM (saturated)\n\nteenager arbitrage = <$0.50 CPM (performance based)\n\nyou don't pay for the videos\n\nyou pay for the views\n\nif they flop, you pay $0\n\nif they hit, you print cash\n\nthis is how you actually \"validate\" an app in 2025\n\nif you’re an app owner and you want access to my teenagers (pause), message me",
+      "url": "https://x.com/alexxgrowth/status/1993987398640738566",
+      "views": 111072,
+      "likes": 634,
+      "replies": 39,
+      "retweets": 18,
+      "bookmarks": 1206,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1999071912928907471",
+      "date": "2025-12-11T11:00:59+00:00",
+      "text": "stop laughing at the \"slide 4\" ad strategy...\n\nyou are getting cooked by 16 year olds using canva\n\nmost people see this image and think \"cringe\" or \"deceptive\"\n\nwrong.\n\nthis is the single highest ROI format on TikTok right now because it completely bypasses \"Ad Blindness\"\n\nusers have trained their brains to scroll past anything that looks like high production marketing\n\nbut they stop for \"Aesthetic\"\n\nwe deployed this exact strategy for a mobile app client (can't name them due to NDA)\n\nswitched from UGC videos to \"Pinterest Slideshows\" targeting female creators\n\nresult: 6x revenue growth in 30 days\n\nhere is the actual sauce on how to run this:\n\n1. The \"Bait\" (Slides 1-3)\n\ndo NOT film content.\ngo to Pinterest.\nsearch specific aesthetic terms: \"old money,\" \"clean girl,\" \"that girl vibe.\"\ndownload 3 images.\n\nthis acts as a demographic filter.\nif someone stops for \"luxury hotel\" pics, they likely have disposable income.\nyou are targeting via *content*, not *settings*.\n\n2. The \"Value\" Trap\n\nslides 1-3 need to be generic dopamine.\n\"playlists for studying,\" \"how to fix posture,\" \"morning routine.\"\nget them nodding.\nget them to trust the carousel.\n\n3. The \"Gatekeep\" Frame (Slide 4)\n\nthis is where everyone messes up.\ndo NOT put a big \"DOWNLOAD NOW\" button.\n\nframe the product as a \"secret\" or a \"habit.\"\nlook at the image: \"habits i wish i knew sooner.\"\n\npsychologically, the user feels like they *discovered* a secret code\ninstead of being sold a product\n\n4. The Volume\n\na video ad takes 4 hours to film and edit.\na slideshow takes 4 minutes to assemble.\n\nwe have teenagers churning out 50 of these a day.\ncost is $0.\nif one flops? who cares.\nif one hits? it prints.\n\nthe difference between \"burning cash\" and \"printing\":\n\nStandard Ads: $20 CPM, user sees \"Sponsored\", scrolls instantly.\n\nPinterest Slides: $2 CPM, user saves the post for the \"aesthetic\", downloads the app.\n\nif you want access to my army of 25,000+ teenagers that post slideshows like this\n\ndm me.",
+      "url": "https://x.com/alexxgrowth/status/1999071912928907471",
+      "views": 73819,
+      "likes": 735,
+      "replies": 21,
+      "retweets": 42,
+      "bookmarks": 1198,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2023162500267594079",
+      "date": "2026-02-15T22:28:23+00:00",
+      "text": "https://t.co/BxROu5DLes",
+      "url": "https://x.com/alexxgrowth/status/2023162500267594079",
+      "views": 39419,
+      "likes": 501,
+      "replies": 9,
+      "retweets": 25,
+      "bookmarks": 1066,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "1959073107723124808",
+      "date": "2025-08-23T02:00:01+00:00",
+      "text": "found a glitch in every platform that allows my clippers to get 9x more views\n\nit's so autistic you wouldn't believe it:\n\nbio updates trigger HUGE algorithmic boosts\n\nnot profile changes. micro-updates.\n\nhere's what happened:\n\ncreator changed one word in bio\nnext post got 10x views\n\ntested it 16 times with in-house creators\n\nCONFIRMED.\n\nthe pattern:\n\nupdate bio → post within 4 minutes → massive boost\n\nwhy?\n\nplatforms think you're \"active\"\nthey reward active users\neven if activity is just bio editing\n\nbut here's the exploit:\n\nwe systemized bio updates LMFAO\n\nevery creator changes bio \nright before posting\n4-minute window\n\nGUARANTEED boost\n\nthe changes can even be invisible:\n\n- extra space\n- emoji skin tone\n- punctuation mark\n\nhuman eye can't see it\nalgorithm can\n\ntested across 10k campaign posts:\n\nposts with bio update: 160k  average views\nposts without: 1.9k average views\n\n80x difference\n80x upgrade\n80x virality\n\nfrom changing a period to a comma 😂\n\nyour competitor spends $100k on ads\n\ngay\n\nwe change punctuation and go VIRAL\n\nthe platform thinks we're all \"power users\"\nconstantly updating\nconstantly improving\n\nreally we just found the cheapest hack:\n\nchange nothing\nbut change it constantly\n\nalgorithms are dumb. they count actions not value\n\nso we give them actions\n\nmeaningless ones\nthat create meaningful results\n\nour ghost creators make our clients go viral because of our awesome systems\n\ncomment \"VIRALITY\" and i'll send you the playbook on how you can do blow your brand up organically",
+      "url": "https://x.com/alexxgrowth/status/1959073107723124808",
+      "views": 85903,
+      "likes": 695,
+      "replies": 220,
+      "retweets": 18,
+      "bookmarks": 1052,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1988650146104533488",
+      "date": "2025-11-12T16:48:36+00:00",
+      "text": "i'm 16 and i generated $51,453 for a client from ONE TikTok video\n\nit happened by just reverse-engineering exactly what's already going viral\n\nhere's the process i used to find winning formats in any niche:\n\nstep 1: save 50-100 viral videos\n\nbut don't just scroll and like\n\nyou gotta actually save them to a collection\n\nrequirements:\n\n100k+ views minimum\nposted in last 30 days (formats die fast)\nin your niche or adjacent niches\nshows product naturally (not direct ads)\nspend 2-3 hours doing this\n\nyes it's boring but who cares lmao\n\nyou're building a database of what actually works right now\n\nstep 2: analyze patterns in a spreadsheet\n\nfor each video, document:\n\nexact hook (first 3 seconds of text/audio)\n\ncontent format (slideshow, talking head, POV, screen recording)\nwhere product appears (which slide/second)\nvideo length\nscene change frequency\naudio type (trending sound, original, voiceover)\ncomment themes (what are people asking?)\nafter 50 videos you'll start seeing patterns\n\ncertain hooks appear repeatedly\n\ncertain formats dominate\n\ncertain psychological triggers work consistently\n\nstep 3: the AIDA breakdown\n\nevery viral video follows the same structure\n\nAttention (0-3 seconds): pattern interrupt\n\nhook must do 3 things:\n\nstop the scroll with unexpected visual/text\nqualify the audience (signal who this is for)\ncreate open loop (promise something unresolved)\nstrong hook patterns we see:\n\n\"the reason you're still [pain point]...\" \"how I [achieved result] in [timeframe]\" \"this [thing] is banned in [place] because...\" \"[number] people tried this [thing] and...\"\n\nInterest (3-8 seconds): context bridge\ngive just enough background to make the payoff meaningful\nNOT the full explanation\nminimum viable context\n\nexample for a productivity app:\n\n\"after trying 12 different apps, I found one that actually syncs across devices without crashing\"\n\nthat's enough context\n\nyou don't need the full story yet\n\nDesire (8-25 seconds): value delivery\n\nthis is where you actually teach/entertain\n\nproduct appears naturally as a tool, not the focus\n\nif you promised \"how I organize my day\"\n\nshow the actual process\n\nand the app appears in slide 3-4 as part of that process\n\nviewers think \"oh that's how they do it\"\n\nnot \"oh this is an ad\"\n\nyou'll quickly notice this pattern in all viral + high cvr videos\n\nAction (final 3 seconds): soft conversion\n\nno hard CTAs like \"download now\"\n\ninstead:\n\nshow results: \"saved me 2 hours daily\"\n\nsocial proof: \"12k people use this now\"\n\naddress objection: \"works on both iPhone and Android\"\n\nstep 4: hook formula extraction\n\nfrom your 50 videos, extract the hooks\n\ngroup them by pattern:\n\nfear-based: \"you're losing [thing] every [timeframe]\"\n\nhope-based: \"scientists discovered [solution]\"\n\ncuriosity-based: \"this one [action] adds [result]\"\n\nsocial proof: \"[percentage] of people don't know this\"\n\nnow you have a library of proven hooks\n\nmix and match them:\n\n\"79% of people are losing money daily because they don't know this one budgeting trick\"\n\n= social proof + fear + curiosity\n\nstep 5: format validation\n\nbefore committing to any format, validate it:\n\nhas this format generated 2M+ total views in your niche in last 7 days?\n\ndo comments show conversion intent? (asking for product links, expressing interest)\n\ncan this be replicated by average creators? (not just elite talent)\n\nis it platform-agnostic? (works on TikTok AND Instagram)\n\nif yes to all four, it's worth testing\n\nif no to any, keep looking\n\nstep 6: the comment conversion test\n\ncomments reveal everything\n\nscroll through top comments on viral videos\n\nlook for:\n\n\"what app is this?\" = product discovery \"where do I get this?\" = purchase intent\n\"I tried this and it works\" = testimonials \"seems too good to be true\" = objections\n\nvideos with high views but no product discussion?\n\npure entertainment, not converting\n\nvideos with moderate views but heavy product discussion?\n\ngoldmine - these are the formats to replicate\n\nstep 7: reverse-engineer the winner\n\npick the top performing video in your niche\nwatch it 10 times\n\ndocument:\n\nsecond 0: what visual stopped you?\nsecond 1: what text made you keep watching?\nsecond 3: when did you know what this was about\nsecond 5: when did the product appear?\nsecond 8: what made you want to keep watching?second 15: what kept you from scrolling?\n\nnow recreate that exact structure with your product\n\nnot the same content\n\nthe same STRUCTURE\n\nstep 8: create the content brief\n\nnow document everything for your creators:\n\nhook formulas that tested well\n\nslide-by-slide breakdown with timing\nwhere product appears (never first 3 slides)\naudio guidelines (trending > original > voiceover)\ncall-to-action placement\nthis brief becomes the instruction manual\n\ncommon mistakes:\n\nresearching content YOU like instead of what performs\n\nyour taste doesn't matter at all, if it's going viral then just run it up\n\n+ only looking at massive accounts\n\nthe best formats often start with accounts under 10k followers\n\nyou should be doing this research often & never stay idle on one format\n\nbecause formats die every 3 months\n\nyou NEED to research weekly\n\n60-90 minutes every week watching content, saving examples, updating briefs\n\ni've personally used this exact process for every client\n\ncomment \"REVERSE\" if you want the full guide sent to your dms",
+      "url": "https://x.com/alexxgrowth/status/1988650146104533488",
+      "views": 48348,
+      "likes": 439,
+      "replies": 196,
+      "retweets": 29,
+      "bookmarks": 961,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1975301213227737114",
+      "date": "2025-10-06T20:44:43+00:00",
+      "text": "everyone thinks going viral is random luck\n\ni figured out it couldn't be further from the truth\n\ni tracked 12,500 clips in our influencer campaigns to find the pattern\n\nit's all in the time\n\nclips posted at :00 past the hour:\n98k average views\n\nclips posted at :17 past the hour: \n2.3M average views\n\nclips posted at :00 past the hour: \n98k average views\n\n17 minutes past beats on-the-hour by 23x\n\nhere's why this happens:\n\nplatforms refresh caches at :15\nthe whole thing takes 2 minutes to propagate\n\nso :17 catches fresh algorithm state\n\nlike surfers waiting for the perfect wave\nexcept the wave comes every hour\nat EXACTLY :17 seconds\n\nso i tested this across all platforms:\n\n- tiktok :17 - confirmed\n- instagram :17 - confirmed  \n- youtube :16.9 - confirmed\n\nnice\n\nit's UNIVERSAL\n\nbut then i did something crazy:\n\ni restructured our entire operation:\n\nadded the \"17 minute rule\" to our clipper rulebook\n\nnow we have 100,000 clippers synchronized\nall posting at :17 and :32\nevery hour, 24/7\n\nEVERY SINGLE post we make hits the sweet spot like a very effective algo orgasm\n\nyou're posting meh when convenient\n\nwe're posting gold when optimal\n\nthat's why virality ghost creators stay on top\n\ncomment \"VIRAL\" and i'll send you the guide on how to get 3M+ views in 30 days with ghost content",
+      "url": "https://x.com/alexxgrowth/status/1975301213227737114",
+      "views": 55396,
+      "likes": 520,
+      "replies": 169,
+      "retweets": 17,
+      "bookmarks": 932,
+      "classification": "tactical_list"
+    },
+    {
+      "id": "2014796776524435720",
+      "date": "2026-01-23T20:25:59+00:00",
+      "text": "the quit porn app marketing strategy that actually works is kinda unhinged but hear me out\n\nwe started running tiktoks that open with like 2 seconds of an OF girl (nothing explicit obv) then hard cut to goggins screaming about discipline with our app dashboard overlaid\n\ncomments section becomes a warzone. half the people are confused, some are mad, some are joking, and buried in there are the guys genuinely asking what the app is\n\nthe algo doesn't care WHY people comment. it just sees engagement and pushes it further\n\nso yeah we're technically getting reach from people who have zero intention of quitting anything. but that reach is what gets us in front of the 10% who actually need it and will convert\n\ngeneric \"you can do this king\" content gets like 200 views. this stuff does 50k+ consistently\n\nthe game isn't about making content your target audience likes. it's about making content that REACHES your target audience. those are different problems",
+      "url": "https://x.com/alexxgrowth/status/2014796776524435720",
+      "views": 67601,
+      "likes": 831,
+      "replies": 20,
+      "retweets": 17,
+      "bookmarks": 914,
+      "classification": "teaching"
+    },
+    {
+      "id": "2057956944359661620",
+      "date": "2026-05-22T22:49:05+00:00",
+      "text": "https://t.co/Vg4rY96n9X",
+      "url": "https://x.com/alexxgrowth/status/2057956944359661620",
+      "views": 123313,
+      "likes": 220,
+      "replies": 9,
+      "retweets": 10,
+      "bookmarks": 850,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2031950798658097516",
+      "date": "2026-03-12T04:29:56+00:00",
+      "text": "a lot of people have been telling me clipping is a scam\n\nSOO i'm putting myself in a 30 day challenge to prove that ANYONE can make $10k/mo in 30 days\n\nthe rules:\n\n- starting with $0\n- fresh Content Rewards account\n- no special access. same tools anybody gets on day 1\n\nthe whole point is to show that if the CEO of a clipping company can do this w/ the same tools you have access to, there's nothing stopping you from doing it too\n\nthe goal: \n\n$10,000 in 30 days - enough to buy a Rolex in cash\n\nif i hit it, i buy it and give it to one of my followers here\n\nif i don’t i do a face reveal and give whatever money i made to israel\n\neverything will be journaled daily on X\n\nevery clip, every dollar i make, every new thing i learn\n\nand then you'll see what happens when the compounding kicks in\n\nday 1 starts tomorrow\n\nfollow + rt if you wanna stay tuned :)",
+      "url": "https://x.com/alexxgrowth/status/2031950798658097516",
+      "views": 183979,
+      "likes": 754,
+      "replies": 53,
+      "retweets": 79,
+      "bookmarks": 783,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2048114487241183299",
+      "date": "2026-04-25T18:58:40+00:00",
+      "text": "mf delete this",
+      "url": "https://x.com/alexxgrowth/status/2048114487241183299",
+      "views": 110105,
+      "likes": 467,
+      "replies": 8,
+      "retweets": 30,
+      "bookmarks": 781,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2022322613947678727",
+      "date": "2026-02-13T14:50:58+00:00",
+      "text": "one of my clippers made $45,429 in a week from content arbitrage\n\nthis is the easiest business model ever\n\nkids are making thousands a day (he's 16)\n\nwant the breakdown? deleting in 24 hours....  \n\nrt & comment “arbitrage” and I’ll dm you a free guide on how to start. (must be following for auto dm)",
+      "url": "https://x.com/alexxgrowth/status/2022322613947678727",
+      "views": 112639,
+      "likes": 1229,
+      "replies": 1068,
+      "retweets": 330,
+      "bookmarks": 751,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2028547900272247135",
+      "date": "2026-03-02T19:08:02+00:00",
+      "text": "if i lost everything i had and had to start from zero\n\nzero b*tches, zero followers, zero revenue...\n\nwithout a question i’d start clipping\n\nnot b/c it's my business and i'm biased (although i am)\n\nbut because there is genuinely no other model i've seen where you can go from $0 to $5k+/mo in 30 days with nothing but a phone\n\nhere's my exact plan if i woke up tomorrow w/ no company, no connections, no money:\n\nday 1: \n\nsign up on Content Rewards. \n\nbrowse campaigns. pick 2 in the highest-CPM niche available (probably crypto or fintech). create 2 dedicated accounts for that niche. download capcut\n\nday 2-7:\n\nlearn the editing basics.\n\nwatch what top-performing clips in my niche look like. study hooks. make 3-5 clips per day even if they're bad.\n\nthe goal isn't quality yet.\n\n it's building the muscle and getting the algorithm to start recognizing my accounts as active\n\nday 8-14:\n\nstart batch editing.\n\nbrainstorm 5 hooks per campaign before touching the editor. aim for 8-10 clips/day.\n\nmy editing speed should be improving noticeably by now.\n\nstart scheduling clips for early morning and late night drops\n\nday 15-30:\n\nby now i've posted 50+ clips.\n\nthe algorithm trusts my accounts.\n\nmy hooks are getting sharper b/c i've tested dozens of them and can see what works in the data.\n\ni'm probably averaging 1k-10k views per clip.\n\nmonthly earnings somewhere around $500-$2,500\n\nday 30-60:\n\ntrust score is climbing on Content Rewards.\n\ni apply to higher-paying campaigns.\n\nmy batch workflow is locked in at 2 hours/morning.\n\ni start CPM stacking: running 2-3 campaigns in the same niche from each account so the audience graph feeds all of them.\n\nearnings: $5000-$10000\n\nday 60-90:\n\ni'm in premium campaigns.\n\nmy audience graphs are dialed.\n\nmy hook instinct is strong.\n\nposting 12-15 clips/day in about 2 hours.\n\nstart hiring my first editors locally or outsourcing for 10-30% of what i make\n\nearnings: $10,000-$20,000/mo\n\nok now here’s the crazy part:\n\nwhile doing all of this, you build connections, skills, a reputation, etc\n\nall while collecting a vast amount of capital as PROFIT you can enjoy right now (as traxnyc said)\n\nyou can use this reputation and this money to do literally whatever you want in business or in real life\n\nstart another business get a new apartment for yourself buy 100 onlyfans subscriptions\n\nthere’s nothing stopping you from starting TODAY",
+      "url": "https://x.com/alexxgrowth/status/2028547900272247135",
+      "views": 29911,
+      "likes": 429,
+      "replies": 13,
+      "retweets": 27,
+      "bookmarks": 741,
+      "classification": "contrarian_take"
+    },
+    {
+      "id": "2028229291020873735",
+      "date": "2026-03-01T22:02:00+00:00",
+      "text": "how to make get rich off of ROBLOX:  \n\n1/ find a brainrotted niche \n2/ ask chatgpt for enjoyable gameplay loops\n3/ hire and fire a dev to do it for $10-$20 \n4/ use content rewards to market it \n5/ add pay to win gamepasses for 99-999 robux \n6/ profit $100k/mo minimum https://t.co/JuHOKYt80D",
+      "url": "https://x.com/alexxgrowth/status/2028229291020873735",
+      "views": 72778,
+      "likes": 695,
+      "replies": 19,
+      "retweets": 32,
+      "bookmarks": 740,
+      "classification": "teaching"
+    },
+    {
+      "id": "2058195718200803627",
+      "date": "2026-05-23T14:37:53+00:00",
+      "text": "Don’t just bookmark this\n\nGenuinely read it. You can change your life.",
+      "url": "https://x.com/alexxgrowth/status/2058195718200803627",
+      "views": 132449,
+      "likes": 247,
+      "replies": 6,
+      "retweets": 18,
+      "bookmarks": 693,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2028596569461735771",
+      "date": "2026-03-02T22:21:26+00:00",
+      "text": "WTF",
+      "url": "https://x.com/alexxgrowth/status/2028596569461735771",
+      "views": 79952,
+      "likes": 367,
+      "replies": 3,
+      "retweets": 19,
+      "bookmarks": 675,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "1994482791371756026",
+      "date": "2025-11-28T19:05:27+00:00",
+      "text": "people calling her \"mid\" while she prints $4M a month are missing the entire point of the internet right now.\n\nshe didn't need to be a 10/10. she just needed to be \"clippable.\n\nthe funniest part is she didn't even hire an agency\n\nshe accidentally built a decentralized media company because 50,000 random kids realized they could farm views by reposting her content\n\nshe pretty much became a \"raw asset\" for the algorithm.\n\nevery time she stands still in a spider-man costume, thousands of editors download the footage, add their own caption (\"me waiting for him to text back\"), and flood TikTok & IG.\n\nbut here is where she is leaving money on the table:\n\nright now, she relies on \"simp luck.\"\n\nif the trend dies, her distribution dies.\n\nif i was managing her, i would stop relying on randoms and actually hire the top 100 editors to run official burner accounts\n\nlock them into a contract\n\ngive them exclusive footage\n\nit'd force the trend to stay alive for 5 years instead of 5 months\n\nthese organic waves are great but you NEED ghost creators to have predictable inputs and outputs\n\nif you have a personal brand and you aren't recruiting your own fans to distribute your content...\n\nyou are literally hoping for a lottery ticket when you could just build a machine.\n\nif you want access to the 100,000+ teenage creators i manage, DM me and i'll get back to you",
+      "url": "https://x.com/alexxgrowth/status/1994482791371756026",
+      "views": 226369,
+      "likes": 542,
+      "replies": 32,
+      "retweets": 11,
+      "bookmarks": 652,
+      "classification": "story_or_origin"
+    },
+    {
+      "id": "2037035092992733624",
+      "date": "2026-03-26T05:13:07+00:00",
+      "text": "DAY 1 UPDATE (we're cooking, wtf?)\n\nso yesterday i posted 21 videos across 1.5 days on a completely fresh account. i had zero followers, and i did zero warmup.\n\ni got a whopping 390k+ views. 20 out of 21 submissions approved. 450 followers from absolute zero.\n\n$80 made\n\nthe campaign i picked was a logo campaign. the concept is simple, i find cheating videos that are already getting views organically, add a branded watermark to them, throw a link in bio, and submit that thang\n\nnow here's what actually surprised me. everyone in this space talks about account warmup like it's gospel. post 3 videos a day for 2 weeks, don't submit anything, let the algorithm learn your content before you monetize. i ignored all of that completely. posted 21 videos in a day and a half straight to a brand new account and the algorithm didn't punish me once. 35 approvals\n\nmy theory: warmup advice exists because people post mediocre content and blame the algorithm. if the video is actually good the algorithm pushes it regardless of account age. the account being new might even help because there's no bad history to work against you.\n\nwhat i'm doing next: opening 2 more accounts this week. each one gets a completely different campaign niche. the whole point is to let the data pick the winner instead of me guessing. round 1 i bought an account, picked a niche i thought would work, and forced it. that's why it failed. round 2 i'm running multiple niches simultaneously and killing the ones that don't respond by day 7.\n\n$10k in 30 days. the same tools and same platform every creator gets on day 1.\n\nremember,\n\nif i fail, i'll face reveal on social media and donate all my earnings to tel aviv \n\nif i succeed, i will give a rolex to one of you\n\nfollow if you want to see what the data says by the end of the week : )",
+      "url": "https://x.com/alexxgrowth/status/2037035092992733624",
+      "views": 60774,
+      "likes": 459,
+      "replies": 43,
+      "retweets": 24,
+      "bookmarks": 642,
+      "classification": "result_or_receipt"
+    }
+  ],
+  "top_by_replies": [
+    {
+      "id": "2022322613947678727",
+      "date": "2026-02-13T14:50:58+00:00",
+      "text": "one of my clippers made $45,429 in a week from content arbitrage\n\nthis is the easiest business model ever\n\nkids are making thousands a day (he's 16)\n\nwant the breakdown? deleting in 24 hours....  \n\nrt & comment “arbitrage” and I’ll dm you a free guide on how to start. (must be following for auto dm)",
+      "url": "https://x.com/alexxgrowth/status/2022322613947678727",
+      "views": 112639,
+      "likes": 1229,
+      "replies": 1068,
+      "retweets": 330,
+      "bookmarks": 751,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2073040719128801645",
+      "date": "2026-07-03T13:46:37+00:00",
+      "text": "I JUST SOLD MY COMPANY AT 16 YEARS OLD\n\nwords can not describe how i feel rn\n\nwe exited for 7-figures. virality did $3M+ in revenue in 10 months, fully bootstrapped\n\nthis is the full story of how it all started and ended, but first I need to be honest:\n\nmy name isn’t alex, its yanal. as of today i’m one of the youngest self made millionaires in the world\n\nbut it wasn’t like this a few years ago. when i was 14 i realized i wanted to build something awesome (and make a lot of money doing so)\n\ni found my cofounder Ivelin because one of his affiliates was posting on TikTok about a make money server. i joined as a regular member, nothing special. when he reopened the affiliate program I jumped in and my first video did 3M views.\n\nthat got me promoted to manager. a while later I pitched him on starting a clipping agency together. that agency became Virality.\n\nwe met Matt on discord around the time he got a job offer at Whop to be their head of clipping\n\ni told him not to go, and to start Virality with me. he said yes\n\nwe’re three teenagers who met on the internet, zero funding, zero connections. and in under a year we built something worth acquiring.\n\nand it has been the most FUN time of my life\n\nwe’ve been on the wall street journal, got in contact with the whitehouse, ran content for BILLIONAIRES, pissed off tjr, worked with tjr, have made todays news dozens of times, and our content has been seen by 300B+ people\n\nVirality is in great hands with .@ninja_reach and will keep helping creators and brands win.\n\nas for us, we're going all in on Content Rewards, the platform Virality itself runs on. we built one agency on top of it. now we're building what every agency in this space runs on.\n\nshoutouts to my cofounders, close friends and partners:\n\n@waliet took a shot on a random affiliate with one viral video and let me pitch him a whole company. mentored me from day one. nobody understands this industry like him.\n\n@organicbond could've been our biggest competitor. Instead he became the best CGO I know and the hardest worker on the team.\n\n@facelessfarms for being our head director and one of the best marketers i’ve ever worked with. this guy is amazing.\n\n@danvsi for picking us up to build content rewards with him. none of this would be possible without his influence\n\n@itspairaw for helping us with our twitter content early on and later on during the transition. hands down the best marketer on twitter.\n\nand most importantly: thank ALL of you for following me and supporting me\n\nstay in touch, content rewards has some massive updates coming soon\n\nand i can NOT wait to share them with you",
+      "url": "https://x.com/alexxgrowth/status/2073040719128801645",
+      "views": 704997,
+      "likes": 2772,
+      "replies": 410,
+      "retweets": 109,
+      "bookmarks": 1781,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1927741950129488285",
+      "date": "2025-05-28T15:01:11+00:00",
+      "text": "i've generated over 100m+ views for my friend's consumer app through mass short form content\n\nand we only spent $12k ($0.20 cost per install)\n\nwe utilized the \"ghost creator\" method\n\nIt involves having hundreds of people posting for your app, and i set it all up for him\n\ncomment \"GHOST METHOD\" and i'll send you how i did this (must be following)",
+      "url": "https://x.com/alexxgrowth/status/1927741950129488285",
+      "views": 45424,
+      "likes": 353,
+      "replies": 286,
+      "retweets": 10,
+      "bookmarks": 427,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1959073107723124808",
+      "date": "2025-08-23T02:00:01+00:00",
+      "text": "found a glitch in every platform that allows my clippers to get 9x more views\n\nit's so autistic you wouldn't believe it:\n\nbio updates trigger HUGE algorithmic boosts\n\nnot profile changes. micro-updates.\n\nhere's what happened:\n\ncreator changed one word in bio\nnext post got 10x views\n\ntested it 16 times with in-house creators\n\nCONFIRMED.\n\nthe pattern:\n\nupdate bio → post within 4 minutes → massive boost\n\nwhy?\n\nplatforms think you're \"active\"\nthey reward active users\neven if activity is just bio editing\n\nbut here's the exploit:\n\nwe systemized bio updates LMFAO\n\nevery creator changes bio \nright before posting\n4-minute window\n\nGUARANTEED boost\n\nthe changes can even be invisible:\n\n- extra space\n- emoji skin tone\n- punctuation mark\n\nhuman eye can't see it\nalgorithm can\n\ntested across 10k campaign posts:\n\nposts with bio update: 160k  average views\nposts without: 1.9k average views\n\n80x difference\n80x upgrade\n80x virality\n\nfrom changing a period to a comma 😂\n\nyour competitor spends $100k on ads\n\ngay\n\nwe change punctuation and go VIRAL\n\nthe platform thinks we're all \"power users\"\nconstantly updating\nconstantly improving\n\nreally we just found the cheapest hack:\n\nchange nothing\nbut change it constantly\n\nalgorithms are dumb. they count actions not value\n\nso we give them actions\n\nmeaningless ones\nthat create meaningful results\n\nour ghost creators make our clients go viral because of our awesome systems\n\ncomment \"VIRALITY\" and i'll send you the playbook on how you can do blow your brand up organically",
+      "url": "https://x.com/alexxgrowth/status/1959073107723124808",
+      "views": 85903,
+      "likes": 695,
+      "replies": 220,
+      "retweets": 18,
+      "bookmarks": 1052,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1988650146104533488",
+      "date": "2025-11-12T16:48:36+00:00",
+      "text": "i'm 16 and i generated $51,453 for a client from ONE TikTok video\n\nit happened by just reverse-engineering exactly what's already going viral\n\nhere's the process i used to find winning formats in any niche:\n\nstep 1: save 50-100 viral videos\n\nbut don't just scroll and like\n\nyou gotta actually save them to a collection\n\nrequirements:\n\n100k+ views minimum\nposted in last 30 days (formats die fast)\nin your niche or adjacent niches\nshows product naturally (not direct ads)\nspend 2-3 hours doing this\n\nyes it's boring but who cares lmao\n\nyou're building a database of what actually works right now\n\nstep 2: analyze patterns in a spreadsheet\n\nfor each video, document:\n\nexact hook (first 3 seconds of text/audio)\n\ncontent format (slideshow, talking head, POV, screen recording)\nwhere product appears (which slide/second)\nvideo length\nscene change frequency\naudio type (trending sound, original, voiceover)\ncomment themes (what are people asking?)\nafter 50 videos you'll start seeing patterns\n\ncertain hooks appear repeatedly\n\ncertain formats dominate\n\ncertain psychological triggers work consistently\n\nstep 3: the AIDA breakdown\n\nevery viral video follows the same structure\n\nAttention (0-3 seconds): pattern interrupt\n\nhook must do 3 things:\n\nstop the scroll with unexpected visual/text\nqualify the audience (signal who this is for)\ncreate open loop (promise something unresolved)\nstrong hook patterns we see:\n\n\"the reason you're still [pain point]...\" \"how I [achieved result] in [timeframe]\" \"this [thing] is banned in [place] because...\" \"[number] people tried this [thing] and...\"\n\nInterest (3-8 seconds): context bridge\ngive just enough background to make the payoff meaningful\nNOT the full explanation\nminimum viable context\n\nexample for a productivity app:\n\n\"after trying 12 different apps, I found one that actually syncs across devices without crashing\"\n\nthat's enough context\n\nyou don't need the full story yet\n\nDesire (8-25 seconds): value delivery\n\nthis is where you actually teach/entertain\n\nproduct appears naturally as a tool, not the focus\n\nif you promised \"how I organize my day\"\n\nshow the actual process\n\nand the app appears in slide 3-4 as part of that process\n\nviewers think \"oh that's how they do it\"\n\nnot \"oh this is an ad\"\n\nyou'll quickly notice this pattern in all viral + high cvr videos\n\nAction (final 3 seconds): soft conversion\n\nno hard CTAs like \"download now\"\n\ninstead:\n\nshow results: \"saved me 2 hours daily\"\n\nsocial proof: \"12k people use this now\"\n\naddress objection: \"works on both iPhone and Android\"\n\nstep 4: hook formula extraction\n\nfrom your 50 videos, extract the hooks\n\ngroup them by pattern:\n\nfear-based: \"you're losing [thing] every [timeframe]\"\n\nhope-based: \"scientists discovered [solution]\"\n\ncuriosity-based: \"this one [action] adds [result]\"\n\nsocial proof: \"[percentage] of people don't know this\"\n\nnow you have a library of proven hooks\n\nmix and match them:\n\n\"79% of people are losing money daily because they don't know this one budgeting trick\"\n\n= social proof + fear + curiosity\n\nstep 5: format validation\n\nbefore committing to any format, validate it:\n\nhas this format generated 2M+ total views in your niche in last 7 days?\n\ndo comments show conversion intent? (asking for product links, expressing interest)\n\ncan this be replicated by average creators? (not just elite talent)\n\nis it platform-agnostic? (works on TikTok AND Instagram)\n\nif yes to all four, it's worth testing\n\nif no to any, keep looking\n\nstep 6: the comment conversion test\n\ncomments reveal everything\n\nscroll through top comments on viral videos\n\nlook for:\n\n\"what app is this?\" = product discovery \"where do I get this?\" = purchase intent\n\"I tried this and it works\" = testimonials \"seems too good to be true\" = objections\n\nvideos with high views but no product discussion?\n\npure entertainment, not converting\n\nvideos with moderate views but heavy product discussion?\n\ngoldmine - these are the formats to replicate\n\nstep 7: reverse-engineer the winner\n\npick the top performing video in your niche\nwatch it 10 times\n\ndocument:\n\nsecond 0: what visual stopped you?\nsecond 1: what text made you keep watching?\nsecond 3: when did you know what this was about\nsecond 5: when did the product appear?\nsecond 8: what made you want to keep watching?second 15: what kept you from scrolling?\n\nnow recreate that exact structure with your product\n\nnot the same content\n\nthe same STRUCTURE\n\nstep 8: create the content brief\n\nnow document everything for your creators:\n\nhook formulas that tested well\n\nslide-by-slide breakdown with timing\nwhere product appears (never first 3 slides)\naudio guidelines (trending > original > voiceover)\ncall-to-action placement\nthis brief becomes the instruction manual\n\ncommon mistakes:\n\nresearching content YOU like instead of what performs\n\nyour taste doesn't matter at all, if it's going viral then just run it up\n\n+ only looking at massive accounts\n\nthe best formats often start with accounts under 10k followers\n\nyou should be doing this research often & never stay idle on one format\n\nbecause formats die every 3 months\n\nyou NEED to research weekly\n\n60-90 minutes every week watching content, saving examples, updating briefs\n\ni've personally used this exact process for every client\n\ncomment \"REVERSE\" if you want the full guide sent to your dms",
+      "url": "https://x.com/alexxgrowth/status/1988650146104533488",
+      "views": 48348,
+      "likes": 439,
+      "replies": 196,
+      "retweets": 29,
+      "bookmarks": 961,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1957844726750552146",
+      "date": "2025-08-19T16:38:52+00:00",
+      "text": "i'm 15 and i just got wired $1M to manage a clients clipping campaign\n\nask me anything",
+      "url": "https://x.com/alexxgrowth/status/1957844726750552146",
+      "views": 274695,
+      "likes": 1542,
+      "replies": 184,
+      "retweets": 15,
+      "bookmarks": 581,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2079215356090982794",
+      "date": "2026-07-20T14:42:25+00:00",
+      "text": "who wants a content rewards x badge?\n\ngiving it to 50 random people",
+      "url": "https://x.com/alexxgrowth/status/2079215356090982794",
+      "views": 19546,
+      "likes": 206,
+      "replies": 182,
+      "retweets": 4,
+      "bookmarks": 13,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "1975301213227737114",
+      "date": "2025-10-06T20:44:43+00:00",
+      "text": "everyone thinks going viral is random luck\n\ni figured out it couldn't be further from the truth\n\ni tracked 12,500 clips in our influencer campaigns to find the pattern\n\nit's all in the time\n\nclips posted at :00 past the hour:\n98k average views\n\nclips posted at :17 past the hour: \n2.3M average views\n\nclips posted at :00 past the hour: \n98k average views\n\n17 minutes past beats on-the-hour by 23x\n\nhere's why this happens:\n\nplatforms refresh caches at :15\nthe whole thing takes 2 minutes to propagate\n\nso :17 catches fresh algorithm state\n\nlike surfers waiting for the perfect wave\nexcept the wave comes every hour\nat EXACTLY :17 seconds\n\nso i tested this across all platforms:\n\n- tiktok :17 - confirmed\n- instagram :17 - confirmed  \n- youtube :16.9 - confirmed\n\nnice\n\nit's UNIVERSAL\n\nbut then i did something crazy:\n\ni restructured our entire operation:\n\nadded the \"17 minute rule\" to our clipper rulebook\n\nnow we have 100,000 clippers synchronized\nall posting at :17 and :32\nevery hour, 24/7\n\nEVERY SINGLE post we make hits the sweet spot like a very effective algo orgasm\n\nyou're posting meh when convenient\n\nwe're posting gold when optimal\n\nthat's why virality ghost creators stay on top\n\ncomment \"VIRAL\" and i'll send you the guide on how to get 3M+ views in 30 days with ghost content",
+      "url": "https://x.com/alexxgrowth/status/1975301213227737114",
+      "views": 55396,
+      "likes": 520,
+      "replies": 169,
+      "retweets": 17,
+      "bookmarks": 932,
+      "classification": "tactical_list"
+    },
+    {
+      "id": "2066968188710265218",
+      "date": "2026-06-16T19:36:33+00:00",
+      "text": "one app on Content Rewards got 382,322,772 views in 30 days with AI slideshows \n\nit's one of the easiest and most scalable formats ever, but prints like crazy \n\nwant the breakdown? \n\ndeleting in 24 hours....    \n\nrt & comment “slideshows” and I’ll dm you a free guide on how to start\n\n(must be following for open dms)",
+      "url": "https://x.com/alexxgrowth/status/2066968188710265218",
+      "views": 20555,
+      "likes": 192,
+      "replies": 166,
+      "retweets": 61,
+      "bookmarks": 145,
+      "classification": "teaching"
+    },
+    {
+      "id": "2038271712656073076",
+      "date": "2026-03-29T15:07:00+00:00",
+      "text": "this YN started clipping 2 weeks ago\n\nhe almost quit\n\nuntil he got his first 100k video and got paid\n\nand literally all he did was watch the free content rewards course to learn how \n\nrt + comment \"CONTENT\" and i'll send you the full course (must be following for auto dm) https://t.co/IEZhVUGMA1",
+      "url": "https://x.com/alexxgrowth/status/2038271712656073076",
+      "views": 10330,
+      "likes": 173,
+      "replies": 140,
+      "retweets": 62,
+      "bookmarks": 88,
+      "classification": "story_or_origin"
+    },
+    {
+      "id": "2068352338268750162",
+      "date": "2026-06-20T15:16:40+00:00",
+      "text": "https://t.co/fWHuJ4VrxU",
+      "url": "https://x.com/alexxgrowth/status/2068352338268750162",
+      "views": 1212786,
+      "likes": 1438,
+      "replies": 118,
+      "retweets": 179,
+      "bookmarks": 5075,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "1966549950788960375",
+      "date": "2025-09-12T17:10:19+00:00",
+      "text": "i discovered the \"platform exhaustion point\" \n\nwhere algorithms give up and promote EVERYTHING\n\nevery platform has a threshold:\n\npost below it: normal distribution\npost above it: they surrender like a good boy\n\ntiktok: 45 posts per hour\ninstagram: 34 posts per hour\nyoutube: 89 posts per hour\n\nbeyond these points, the algorithm stops filtering\n\nand just starts promoting everything\n\nit assumes you/the brand/the hashtag MUST be trending\n\ni tested with burner accounts for in house and public campiangs:\n\naccount A: 10 posts/day for 30 days\naccount B: 50 posts in 24h, then nothing\n\naccount A: 340k total views\naccount B: 2m total views\n\nthe spike BROKE something\n\nplatforms aren't designed for volume\n\nthey're designed for awesome users\n\nbut our ghost creators aren't users\n\nmf we're attackers\n\nso now i reorganized the entire operation\n\nfor some in house campaings:\n\ninstead of consistent posting\nwe do \"surge attacks\"\n\nstaying silent for 23 hours\n\nthen 1 hour of absolute chaos\n\n350 posts in 60 minutes\n\nthe algorithm has a SEIZURE and EVERYTHING gets pushed.\n\nclients are confused:\n\n\"why aren't we posting consistently?\"\n\nBECAUSE consistency is predictable\n\npredictable is filterable\nfilterable is death\n\nchaos is unfiltered, and unfiltered is VIRAL\n\nwe have 21,000 clippers trained in surge tactics and coordinated chaos at scale\n\ngay marketing agencies schedule posts\n\nwe make sure posts go viral by leaving no breathing room for the algorithm to pass them\n\nthe difference is everything\n\ncomment \"VIRAL\" and i'll send you my ghost content playbook that can get you 3M views guaranteed in 30 days organically",
+      "url": "https://x.com/alexxgrowth/status/1966549950788960375",
+      "views": 25302,
+      "likes": 298,
+      "replies": 116,
+      "retweets": 13,
+      "bookmarks": 358,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2024469593087979988",
+      "date": "2026-02-19T13:02:18+00:00",
+      "text": "one of our creators went from mass 800-view clips to mass averaging 120k+ in 2 weeks\n\nnow he’s doing $21k/mo just posting clips\n\nhe changed literally ONE thing about how he edits:\n\nthe first 6 seconds\n\nwe pulled data from 14,000 clips across our network last month and the results were stupid clear:\n\nclips where 70%+ of viewers made it past second 6 averaged 120k views\n\nclips where under 40% made it past second 6 averaged 1.8k views\n\nsame creators. same campaigns. same platforms\n\nthe only difference was the opening\n\nhere's what's actually happening under the hood:\n\nwhen you post a clip, the platform shows it to a small test batch of 200-500 people. it's measuring one thing:\n\ndid they keep watching?\n\nif the retention past 6 seconds is high, your clip gets pushed to a bigger batch. then a bigger one. then a bigger one\n\nevery tier is a gate. and early retention is the key to every single gate\n\nso the entire game is won or lost before your viewer even knows what the video is about\n\nthis is why an average clip w/ an incredible hook will outperform an incredible clip w/ an average hook every time\n\nwhat actually makes a 6-second hook work:\n\n1/ pattern interrupt - something visually unexpected in frame 1. motion, contrast, confusion. anything that makes the thumb stop\n\n2/ open loop - a statement that NEEDS resolution. \"this got me banned from 3 platforms\" can't be scrolled past. the brain demands closure\n\n3/ specific number - \"$14,999 in one week\" hits 10x harder than \"a lot of money.\" the brain locks onto specifics and treats them as credible\n\nour top creators on Content Rewards test 3-5 hook variations on the exact same clip body\n\none version opens w/ text: \"i made $200 today posting videos i didn't film\"\n\nanother opens face-to-camera: \"this is what $200 in 2 hours looks like\"\n\nanother just shows the dashboard w/ earnings ticking up\n\nsame video after second 6. completely different performance\n\nthe hook is the whole game. everything else is secondary\n\ncomment \"VIRAL\" and i'll send you the swipe file our top clippers use to write theirs",
+      "url": "https://x.com/alexxgrowth/status/2024469593087979988",
+      "views": 22054,
+      "likes": 167,
+      "replies": 107,
+      "retweets": 8,
+      "bookmarks": 195,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1957850046000414917",
+      "date": "2025-08-19T17:00:00+00:00",
+      "text": "okay interesting discovery:\n\nif 17 creators post identical content within 3 minutes\nthe algorithm thinks it's \"breaking news\"\npushes everything to trending\n\ntested this 32 times with a few in-house ghost creators\nALWAYS works\n\nmanufacturing news > reporting news",
+      "url": "https://x.com/alexxgrowth/status/1957850046000414917",
+      "views": 305812,
+      "likes": 4983,
+      "replies": 95,
+      "retweets": 156,
+      "bookmarks": 2165,
+      "classification": "observation_or_update"
+    },
+    {
+      "id": "2069909757163442427",
+      "date": "2026-06-24T22:25:17+00:00",
+      "text": "is anyone based in nyc\n\npls dm me if u are",
+      "url": "https://x.com/alexxgrowth/status/2069909757163442427",
+      "views": 35498,
+      "likes": 232,
+      "replies": 94,
+      "retweets": 1,
+      "bookmarks": 24,
+      "classification": "offer_or_cta"
+    },
+    {
+      "id": "1981014285036998693",
+      "date": "2025-10-22T15:06:25+00:00",
+      "text": "i turned 16 yesterday  \n\nalso hit $1M ARR yesterday  \n\nask me anything and i'll answer :)",
+      "url": "https://x.com/alexxgrowth/status/1981014285036998693",
+      "views": 33269,
+      "likes": 277,
+      "replies": 93,
+      "retweets": 4,
+      "bookmarks": 53,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1970847940823400467",
+      "date": "2025-09-24T13:49:00+00:00",
+      "text": "autistic content hack:\n\nsharing YOUR LOSSES makes more money than sharing wins\n\ni told my clippers to post two identical product launches:\n\nversion A:\n\"made $100k this month!\"\n\nversion B:\n\"lost $30k but learned this...\"\n\nversion A:\n123k views, 13 sales\n\nversion B:\n5.4M views, 1450 sales\n\nlosing stories convert 49x better\n\nhere's the psychology:\n\nwinners create distance\n\nbut losers create connection\n\npeople don't trust perfection\nthey trust STRUGGLE\n\nso now every campaign starts with failure:\n\n\"spent $10k on ads that flopped\"\n\"porn addiction made my wife leave”\n\"this almost bankrupted me\"\n\nthen pivot to solution\n\nthe vulnerability ladder:\n\n1. admit failure\n2. show specific numbers\n3. explain the lesson\n4. soft pitch solution\n\ni trained 21,000 clippers to lead with Ls for most campaigns\n\nreal or invented\nDOESN’T MATTER\n\nbecause you're flexing success\nand we’re flexing failure\n\nsuccess isolates\nfailure RESONATES\n\nresonation = $$$$$$$$$$$$$$$\n\ncomment \"VIRAL\" and i’ll send you my ghost content playbook that will generate you 3M organic views in 30d",
+      "url": "https://x.com/alexxgrowth/status/1970847940823400467",
+      "views": 33551,
+      "likes": 483,
+      "replies": 80,
+      "retweets": 21,
+      "bookmarks": 593,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1992901388876107865",
+      "date": "2025-11-24T10:21:32+00:00",
+      "text": ".@brezscales  is a scammer and doesn't pay his creators\n\nhes $500k+ in debt to his clippers and doesn't plan on paying them back\n\nhow the fuck could .@whop  let this happen?\n\nbrez is using whops lack of quality control to \"pump and dump\" clipping campaigns\n\nlets say you made a video that got 1,500,000 views at a $1 CPM\n\nbrez now owes you $1.5k\n\nyou submit your clip for payouts\n\nbut instead of paying you\nbrez ENDS THE CAMPAIGN\n\nso now you haven't been compensated for the millions of views you've generated\n\nthis isn't just a random unlucky timing thing\n\nthis has happened to dozens of clippers that brez is working with\n\nin the screenshot below, you can see his campaign manager share a dashboard of his CPM\n\n$0.32/1k views\n\nbut wait\n\nAREN'T YOU PAYING THEM$ $1-$1.5 PER 1K VIEWS?\n\nbrez is:\n\n1/ starting new campaigns every 2-4 weeks\n2/ waiting for campaigns to get multiple millions of views\n3/ ENDING THE CAMPAIGNS while multiple clippers are waiting for payments of $1k-$50k\n4/ repeat \n\nwhat the fuck?\n\nhow has whop not caught onto this sooner?\n\ni would never ever let this happen in virality\n\nwe only work with quality brands who can actually pay and we're always transparent with the budget\n\nif a budget were to expire and not be renewed for a while, i pay out of pocket to make sure our clippers are fed and our brands are happy\n\nbut what Brez is doing is borderline criminal\n\nactually IT IS CRIMINAL\n\nand it's clearly not a mistake because this is happening multiple times\n\ninfact they JUST started another campaign\n\nit's getting out of hand\n\n.@whop .@brezscales  please address this",
+      "url": "https://x.com/alexxgrowth/status/1992901388876107865",
+      "views": 383604,
+      "likes": 876,
+      "replies": 73,
+      "retweets": 25,
+      "bookmarks": 326,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1989296429047619630",
+      "date": "2025-11-14T11:36:42+00:00",
+      "text": "chipotle just ran their first ever UGC national TV campaign\n\n\"YourPotle\", a 15-second spot compiled entirely from TikTok mukbang creators showing their custom orders\n\nhere's the breakdown and why McDonald's should be doing this for McRib (but 10x better):\n\nwhat Chipotle did:\n\nidentified 100's of mukbang creators already posting Chipotle content organically\n\ncreators like .@janemukbangs (6.9M followers) filming themselves eating massive burritos\n\n\"triple-wrapped burrito with 3 scoops of rice mixed with guac using a milk frother\"\n\nChipotle paid them for content rights (estimated $2-5k per creator)\n\ntook the best-performing clips from social\n\ncompiled them into a 15-second TV spot with Doechii's \"Denial is a River\"\n\nproduction timeline: 3-4 weeks (vs 6+ months for traditional TV ads)\n\nthe cost difference:\n\ntraditional TV commercial production: $500k-2M+\n\nChipotle's approach: under $50k for creator payments + editing\n\nMcDonald's 2023 ad spend: $389M globally\n\nChipotle 2023 ad spend: $264M\n\nbut Chipotle's approach cost fraction of one traditional commercial\n\nit worked because:\n\nthe content already proved itself on social first\n\n.@janemukbangs' video had 156k views before being featured in the TV spot\n\nthey weren't even guessing if people would resonate with it\n\nthey already had data proving it performed\n\nplus the creators were promoting it organically to their audiences\n\ndouble distribution for fraction of the cost\n\nbut here's where Chipotle left money on the table:\n\nthey only used 9 creators for one TV spot\n\nthey could've scaled this to billions of views on social\n\nthe McDonald's opportunity with McRib (our model):\n\nphase 1: recruit the influencers\n\nhire 50-100 food mukbang creators before McRib launch\n\ngive them early access\n\npay $3-5k each for raw content + usage rights\n\nthey film themselves eating McRib (genuine reactions, multiple angles)\n\nthey send you all the raw footage\n\nphase 2: activate the clippers\n\nnow you have 100+ hours of raw McRib mukbang footage\n\ndeploy 1,000+ clippers to create content using that footage\n\nclippers make:\n\n→ split-screen videos (McRib mukbang top, subway surfers bottom)\n→ reaction compilations\n\"ranking every McRib order\" videos\n→ before/after edits\n\"trying McRib for first time\" compilations\n\ntheir payment: $0.20-0.50 per 1k views\n\nwith $1k cap per video\n\nthe math:\n\n50 influencers × $5k = $250k for raw content\n\n10,000 clippers posting daily\n\naverage 50k views per video (i'm being conservative here lol)\n\n10,000 videos/day × 50k views = 500M daily views\n\nover 30 days = 15 billion views\n\nat $0.20 CPM with caps = $300k-$600k total creator payments\n\ntotal campaign cost: $700k-$800k\n\nresult: 15 billion organic views + all the raw footage for TV/ads\n\nvs traditional approach:\n\n$2M for one TV commercial\n\nruns on TV only\n\nzero organic social reach\n\nthis works better than Chipotle's model because Chipotle paid creators and used their content once\n\nyou're paying creators for raw footage\n\nthen deploying 1,000 clippers to remix it infinitely\n\none piece of raw mukbang footage → 100 different viral clips\n\nthese clippers are incentivized to make content go viral (they only get paid for views)\n\nthe content formats clippers would create:\n\n→ split-screen: McRib mukbang on top, engaging content on bottom (subway surfers, ASMR, satisfying videos)\n→ compilation: \"every way people eat McRib\" (10 different creators spliced together)\n→ ranking: \"rating McRib orders from worst to best\"\n→ reaction mashups: side-by-side reactions of 4 creators trying it\n→ educational: \"the history of McRib\" with mukbang footage as B-roll\n→ controversy: \"is McRib actually good?\" (gets engagement from both sides)\n\nbrands don't do this because they're scared of losing creative control\n\nand they don't know how to structure clipper payments\n\n+ they'e worried about brand safety\n\n+ don't have systems to verify traffic sources before paying\n\nthis is what i do:\n\ni run this exact model for brands at scale\n\n100k+ creators (influencers + clippers) in our network\n\ni handle:\n\ninfluencer recruitment and raw content acquisition\n\nclipper deployment and content strategy\n\npayment verification (traffic sources, demographics, fraud detection)\n\npayment structure ($0.20-2 RPM depending on content type, with caps)\n\ngeographic targeting (40%+ tier 1 audiences required)\n\ntraffic source verification (80-95% from FYP = legit, 90%+ \"Other\" = denied)\n\nrecent campaign: $65k monthly spend = 300M+ views ($0.21 CPM)\n\nMcDonald's specific opportunity:\n\nMcRib already has cult following and organic demand\n\nthe scarcity marketing is working\n\nbut you're leaving billions of impressions on the table\n\nimagine \"McRib is back\" flooding TikTok from 1,000 accounts simultaneously\n\nevery angle, every format, every niche\n\nall pointing back to McDonald's\n\nfor under $600k\n\nvs spending $2M on one TV commercial that runs for 2 weeks\n\ni can run this for you:\n\ni manage 100k+ creators (influencers + clippers) ready to be deployed\n\ni've generated 300M+ views monthly at $0.21 CPM for other brands\n\ni handle everything:\n\n→ influencer recruitment and raw content acquisition\n→ clipper deployment across 10,000+ accounts\n→ traffic verification before every payment\n→ geographic targeting enforcement\n→ fraud detection (botted traffic gets denied)\n\nGuillaume, if you want to test this model for McRib's next launch\n\nhit me up\n\ni'll run a pilot campaign and show you the results before scaling",
+      "url": "https://x.com/alexxgrowth/status/1989296429047619630",
+      "views": 14992,
+      "likes": 85,
+      "replies": 72,
+      "retweets": 45,
+      "bookmarks": 65,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1959027808044196263",
+      "date": "2025-08-22T23:00:01+00:00",
+      "text": "okay i haven't tested this myself yet\n\nbut i figured out how to crash any restaurant's stock using 5,000 food tiktokers\n\n(never doing this but someone will)\n\nstep 1: short the stock, buy puts on chipotle\n\nstep 2: 5,000 creators post \"got food poisoning from chipotle\"\n\nstep 3: fake receipts, fake hospital bands, fake evidence \n\nstep 4: news picks up \"viral food poisoning trend\" \n\nstep 5: stock drops 40% from reputation crisis \n\nstep 6: puts print money\n\ntimeline: \n72 hours from activation to stock crash \n\ncost: \n$20k-$200k for creator payments\n\nreturn: \n$10M+ from options\n\nthe beautiful part: \nimpossible to prove coordination ❤️‍🩹\n\ncreators just \"happened\" to get sick same week algorithm \"randomly\" pushed the content \n\nSEC can't prosecute viral content LOL\n\na client offered us 5-figures to run a similar play but i said no because i'm not insane\n\nbut someone else will figure this out \nprobably already happening\nto a brand near you\n\nthis is why i stick to making apps/products/brands go viral \n\nmuch less illegal\n\nwhen 5,000 people say your food sucks... \n\nreality becomes negotiable\n\nand when 5,000 people are telling tiktok how amazing and helpful your brand is...\n\nreality becomes virality",
+      "url": "https://x.com/alexxgrowth/status/1959027808044196263",
+      "views": 175071,
+      "likes": 467,
+      "replies": 69,
+      "retweets": 8,
+      "bookmarks": 290,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1972620424597925923",
+      "date": "2025-09-29T11:12:13+00:00",
+      "text": "i'm 15 making $100k/mo and i've never read a single book\n\ni think they're a massive waste of time\n\nonce back in 2nd grade maybe\n\nbut never again\n\ni'm so sick of every finance guru telling you to \"learn before you earn\"\n\nthey're saying this so you waste your time and let them get ahead of you\n\nyou don't learn by reading 300 pages of someone else saying \"i got lucky by working hard\"\n\nyou learn by ACTUALLY WORKING HARD\n\ni grew my business to 7-figures by obsessing over:\n\nAI\nCLV\nUGC\nCPMs\nCTRs\nclip fatigue\ntiktok algorithm\nclipper burnout\ninstagram algorithm\n\nyou can't ever tell me you will find this through Robert Greene or David Goggins\n\nso now when people ask me \"whats your favorite book\"  \n\ni just say \"oh riley reid has some great projects\" \n\nstop wasting your time on things that have zero ROI for your business",
+      "url": "https://x.com/alexxgrowth/status/1972620424597925923",
+      "views": 35752,
+      "likes": 337,
+      "replies": 62,
+      "retweets": 5,
+      "bookmarks": 247,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "2067731804870602835",
+      "date": "2026-06-18T22:10:53+00:00",
+      "text": "Yo wtf is this IG ban wave\n\nEveryone I know running UGC programs is getting COOKED\n\nHas anyone found the fix to this???",
+      "url": "https://x.com/alexxgrowth/status/2067731804870602835",
+      "views": 69619,
+      "likes": 257,
+      "replies": 61,
+      "retweets": 5,
+      "bookmarks": 164,
+      "classification": "question"
+    },
+    {
+      "id": "2034097365292868045",
+      "date": "2026-03-18T02:39:38+00:00",
+      "text": "new set up chat\n\nhow we looking? https://t.co/gwKtEON7Lg",
+      "url": "https://x.com/alexxgrowth/status/2034097365292868045",
+      "views": 16385,
+      "likes": 312,
+      "replies": 59,
+      "retweets": 2,
+      "bookmarks": 28,
+      "classification": "question"
+    },
+    {
+      "id": "1963232342207553549",
+      "date": "2025-09-03T13:27:20+00:00",
+      "text": "nobody's gonna believe me on this:\n\nPERFECT HOOKS ARE ACTUALLY KILLING YOUR CONVERSIONS\n\nyou've been brainwashed by shortform-fluencers to think differently\n\ni discovered this from studying 5k+ of our clippers' posts\n\nhere's what happened:\n\nwe had INSANE hooks for a client\n\ngot 92% watch rate past the first 5 seconds\n\nBUT \n\nonly 2% had a full retention rate (aka made it to the end)\n\nalgorithm sees massive drop-off\nthinks content is bad\nkills distribution\n\nmeanwhile shitty hooks actually perform better:\n\n60% watch first 10 seconds\n38% complete the video\n20% click profile\n\n10% of profile clickers will click on YOUR product link\n\nalgorithm sees consistency in conversions and retention\n\ntherefore pushes everywhere\n\nwhy the fuck does this happen??\n\nthe autistic math:\n\nlosing viewers immediately\nis WAY BETTER\nthan losing them after hooking them\n\nbecause you filter the gays and are now reaching the perfec target audience\n\nafter noticing this i did some experimenting\n\ntested with 5302 clips for a video campaign:\n\nsplit the clippers apart:\n\ngroup a: hollywood-level hooks\ngroup b: random guy talking\n\ngroup a: 12M total views\ngroup b: 4M total views\n\nBUT\n\nGROUP B HAD HIGHER CONVERSIONS LOL\n\n4x more people clicked the profile compared to the perfected hooks\n\nthe pattern is clear:\n\nmoderate interest throughout beats extreme interest that DIES\n\nso we engineered the \"anti-hook\"\n\ndeliberately mild openings that maintain attention rather than spike it\n\nclients hate it initially\n\n\"this opener is boring\"\n\"nobody will watch\"\n\"i might go to whop\"\n\nshow them the data + sales\n\n$2000 in downloads today\n3M views in 12h\nwhops dead clippers\n\nthey STFU really fast lol\n\ntraditional content:\ngrab attention then lose it\n\nanti-hook content: \ndon't try to grab it, never lose it\n\nit's psychological jiu-jitsu 🥋\n\nwhen you expect nothing, everything surprises you\n\nnow training a few in-house clippers on this\n\nto create videos with banger hooks\nfor mega virality\n\nbut also to create content with mid hooks\nfor mega conversions\n\nthe bar is so low it's underground\n\nand we're playing limbo\n\nwhile competitors perfect their hooks\nwe're perfecting sustained decency\n\nsustaining \"alright\" beats unsustainable excellence\n\nevery single time\n\ncomment \"HOOK\" and i'll send you my ghost content playbook on how to get millions of views at 10% the CPM of paid ads",
+      "url": "https://x.com/alexxgrowth/status/1963232342207553549",
+      "views": 14469,
+      "likes": 150,
+      "replies": 59,
+      "retweets": 1,
+      "bookmarks": 163,
+      "classification": "result_or_receipt"
+    },
+    {
+      "id": "1965375930508988562",
+      "date": "2025-09-09T11:25:11+00:00",
+      "text": "we cracked the code on getting millions of views with controversy\n\nWITHOUT attacking anyone or starting actual beef\n\nand we do this for all of our clients\n\nthe formula is stupidly simple:\n\nattack ideas, not people\nattack methods, not morals\nattack results, not intentions\n\nexample:\n\nwrong: \"gary vee is an idiot\"\n\nright: \"working 18 hours is mathematically stupid\"\n\none gets you cancelled\none gets you viral\n\ntested this in a \"call out campaign\" we did last month\n\n1455 posts showed this data:\n\npersonal attacks: \n\nmassive negative sentiment\n1.3% profile click ratio\nlow shares\n\nbecause nobody wants to see their idols hurt\n\nmethod attacks:\n\nleave people thinking \"damn that's interesting\"\n12.5% profile click rate\naka more clicks for brand\n\nBUT there's one VERY important thing to note:\n\nyou definitely SHOULD mention a person in the next slide or next part of the video\n\ne.g:\n\ninstead of:\n\n\"dan koe's an idiot for telling you to work less\"\n\nthis gets better engagement:\n\n\"working 4h/day sucks, dan koe should not have popularized this\"\n\npeople love defending their methods\n\nand defending their idols even more\n\nthis is how you incorporate both\n\nthey share to prove you wrong\n\nalgorithm sees engagement and pushes harder\n\nour most viral posts last month:\n\n- \"courses are poverty mindset\" (2m views)\nappmafia diss\n\n- \"meetings destroy velocity\" (900k views)\nzoom slander\n\n- \"health apps don't work\" (4m views)\nfitnesspal alternative\n\nnotice: no people mentioned as a hook\n\njust systems being destroyed\n\nwe've weaponized this across the network\n\nour ghost creators are trained to HATE, but strategically.\n\nthe beautiful part:\n\nnobody can get mad at math\n\nwhen you say \"this method loses money\"\nand SHOW the calculation\n\nwhat's the comeback?\n\nthere isn't one\n\njust engagement from people trying to find one\n\ncontroversy without consequences\nviral without villains\n\nme and my clippers are professional instigators\n\nbut morally bulletproof\n\ncomment \"VIRAL\" i'll send you over my ghost content playbook on how to get millions of views super affordably",
+      "url": "https://x.com/alexxgrowth/status/1965375930508988562",
+      "views": 15742,
+      "likes": 217,
+      "replies": 57,
+      "retweets": 6,
+      "bookmarks": 330,
+      "classification": "result_or_receipt"
+    }
+  ],
+  "repeated_first_lines": [
+    [
+      "",
+      8
+    ],
+    [
+      "unpopular opinion:",
+      2
+    ],
+    [
+      "correct",
+      2
+    ],
+    [
+      "i’m a 15 y/o trying to compete with",
+      2
+    ],
+    [
+      "i’m a 15 y/o trying to compete with @whop",
+      2
+    ]
+  ],
+  "repeated_openers": [
+    [
+      "if you",
+      11
+    ],
+    [
+      "i m",
+      10
+    ],
+    [
+      "this is",
+      8
+    ],
+    [
+      "how to",
+      8
+    ],
+    [
+      "i m a",
+      8
+    ],
+    [
+      "i m a 15",
+      8
+    ],
+    [
+      "the best",
+      7
+    ],
+    [
+      "i'm 15",
+      7
+    ],
+    [
+      "i just",
+      6
+    ],
+    [
+      "one of",
+      6
+    ],
+    [
+      "if your",
+      5
+    ],
+    [
+      "looking for",
+      4
+    ],
+    [
+      "i've been",
+      4
+    ],
+    [
+      "i'm 16",
+      4
+    ],
+    [
+      "do not",
+      4
+    ],
+    [
+      "i'm 15 and",
+      4
+    ],
+    [
+      "if you re",
+      4
+    ],
+    [
+      "if you're",
+      3
+    ],
+    [
+      "here's how",
+      3
+    ],
+    [
+      "content rewards",
+      3
+    ],
+    [
+      "should i",
+      3
+    ],
+    [
+      "this is how",
+      3
+    ],
+    [
+      "i'm 16 and",
+      3
+    ],
+    [
+      "i'm 16 and i",
+      3
+    ],
+    [
+      "i'm 15 and i",
+      3
+    ],
+    [
+      "i made",
+      3
+    ],
+    [
+      "ghost content",
+      3
+    ],
+    [
+      "why is",
+      3
+    ]
+  ]
+}

@@ -48,6 +48,7 @@ workspace path lives under `knowledge/`:
 | `skills/kshetez-email-voice-old.md` | `knowledge/skills/kshetez-email-voice-old.md` (use this as the voice skill; the installed skill is not available here) |
 | `tools/x-reply-scout-watchlist.md` | `knowledge/tools/x-reply-scout-watchlist.md` |
 | `abhijay-x-identity/...`, `websites/...` | same path under `knowledge/` |
+| `projects/Beamcite/twitter-format-research/VOICE-ROUTING.md` | same path under `knowledge/` - the voice router, read it before any named-voice draft |
 | `tools/x-reply-extension/data/reply-queue.json` | **do not touch files** - use the server API below |
 | `POST {NGROK_URL}/twitter/<route>` with Basic auth | `POST {base_url}/agent/armory/{job_id}/twitter/<route>` with the job token (the server adds the Armory credentials; allowed: tweet, thread, replies, user, search, credits) |
 
@@ -59,7 +60,7 @@ workspace path lives under `knowledge/`:
    - `items`: queue items to draft (same shape as the extension queue)
    - `account`: empty = follow the writer guide's Step 0 account gate; otherwise
      draft only for that account (`k77builds`, `kshetezVinayak`, or
-     `abhiijayVinayak`, which uses the Avery output style + `avery_reference`)
+     `abhiijayVinayak`, which uses the three-voice set below)
    - `note`: optional context from the user
    - `voice_examples`: recent replies the user actually posted (`posted_text`).
      This is the voice ground truth; give it mild extra weight, as the guide says.
@@ -70,21 +71,63 @@ workspace path lives under `knowledge/`:
      with `POST {base_url}/agent/armory/{job_id}/twitter/tweet` and body
      `{"tweets": ["<tweet_id>"]}`, then return the full text as `tweet_text`.
    - Skipping weak targets is allowed. Say why in `agent_note` and leave `drafts` empty.
+
+### The three-voice set (account `abhiijayVinayak`)
+
+When `account` is `abhiijayVinayak`, write **exactly three drafts per item**, one
+in each voice register, in this order:
+
+| # | Voice | Required reads (all under `knowledge/`) |
+|---|---|---|
+| 1 | **Avery** reply register | `websites/beamcite/learnings/x-post-writer/voice-corpus/averycode.md` (reply section) + `averycode-deep-analysis.md` (A11) |
+| 2 | **Arthur** reply register | `projects/Beamcite/twitter-format-research/arthuryuzbashew-replies.md` **in full** (situational routing, relationship gate, corpus precedents, safety boundary, batch controls) |
+| 3 | **Abhiijay** own voice | `abhijay-x-identity/abhiijay-voice-guide.md` + `guides/x-accounts/abhiijayvinayak.md` |
+
+Read `projects/Beamcite/twitter-format-research/VOICE-ROUTING.md` first; it is the
+router and it governs this section.
+
+**The rule that keeps this safe: the account supplies the facts, the voice supplies
+only the register.** All three drafts speak as @abhiijayVinayak, using only his
+verified facts and allowed claims. Never transfer Avery's or Arthur's life facts -
+their Singapore/career/products/family/revenue, age, location, relationships or
+personal history. Voice changes style and structure only.
+
+- Name the voice first in each draft's `angle`, e.g.
+  `Avery - R7 question - why`, `Arthur - direct answer - why`, `Abhiijay - R2 confession - why`.
+  The Chrome extension shows `angle` as the draft's label on X, so this is what
+  the user reads when picking.
+- The three drafts answer the **same** post with the same honest anchor. They differ
+  in register, not in facts or claims.
+- Do not blend the voices (VOICE-ROUTING: never blend unless asked).
+- Do not mechanically add Arthur's minority markers (`bro`, `yessir`, `time to`,
+  `keep going`, `wait`).
+- If a voice has no honest reply for this post, send fewer than three and say which
+  voice you dropped and why in `agent_note`. Never pad with a weak draft.
+- Every draft still passes the shared human-voice, claim and safety QC gates and the
+  AI judge pass.
+
+For the other accounts (`k77builds`, `kshetezVinayak`, or empty), behaviour is
+unchanged: follow the writer guide's Step 0 account gate and its 2-3 drafts rule.
+
 3. Write results (you may send them in several batches):
 
 ```
 POST {base_url}/agent/job/{job_id}/drafts
 {"items": [
   {"id": "<queue item id>",
-   "drafts": [{"text": "reply text", "angle": "@k77builds R2 confession - why"}],
+   "drafts": [{"text": "reply text", "angle": "Avery - R7 question - why"},
+              {"text": "reply text", "angle": "Arthur - direct answer - why"},
+              {"text": "reply text", "angle": "Abhiijay - R2 confession - why"}],
    "avery_reference": {"example": "", "pattern": "", "template": "", "source_url": ""},
    "tweet_text": "full text if you fetched it",
    "agent_note": "verify-note, or why you skipped"}
 ]}
 ```
 
-   `avery_reference` is only for @abhiijayVinayak. Put verify-notes (facts the
-   user must confirm before posting) in `agent_note`.
+   `avery_reference` is only for @abhiijayVinayak, and describes the Avery draft
+   (draft 1) specifically - the extension renders it as a separate thinking aid, not
+   as a fourth draft. Put verify-notes (facts the user must confirm before posting)
+   in `agent_note`. The server accepts at most 6 drafts per item.
 4. `POST {base_url}/agent/job/{job_id}/done` with
    `{"report": "drafted N, skipped M (why), weak-target flags"}`.
 
