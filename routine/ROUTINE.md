@@ -87,9 +87,16 @@ in each voice register, in this order:
 
 | # | Voice | Required reads (all under `knowledge/`) |
 |---|---|---|
-| 1 | **Avery** reply register | `websites/beamcite/learnings/x-post-writer/voice-corpus/averycode.md` (reply section) + `averycode-deep-analysis.md` (A11) |
-| 2 | **Arthur** reply register | `projects/Beamcite/twitter-format-research/arthuryuzbashew-replies.md` **in full** (situational routing, relationship gate, corpus precedents, safety boundary, batch controls) |
-| 3 | **Abhiijay** own voice | `abhijay-x-identity/abhiijay-voice-guide.md` + `guides/x-accounts/abhiijayvinayak.md` |
+| 1 | **Avery** reply register | `voice-corpus/avery-reply-register.json` (443 of her real replies) + `websites/beamcite/learnings/x-post-writer/voice-corpus/averycode.md` (reply section) + `averycode-deep-analysis.md` (A11) |
+| 2 | **Arthur** reply register | `voice-corpus/arthur-reply-register.json` (896 of his real replies) + `projects/Beamcite/twitter-format-research/arthuryuzbashew-replies.md` **in full** (situational routing, relationship gate, corpus precedents, safety boundary, batch controls) |
+| 3 | **Abhiijay** own voice | `voice-corpus/abhiijay-real-sends.json` (160 paired post/reply) + `abhijay-x-identity/abhiijay-voice-guide.md` + `guides/x-accounts/abhiijayvinayak.md` |
+
+Read `voice-corpus/README.md` first. The corpora are **examples, and they outrank
+the prose guides when the two disagree** - a guide describes the voice, a corpus
+*is* the voice. Sample widely rather than reading the top 20; the files are sorted
+by likes, not by representativeness. Avery's and Arthur's files are register only
+and are **not** paired with the posts they answered, so they cannot tell you which
+move a post deserves - only what a reply of theirs looks and sounds like.
 
 Read `projects/Beamcite/twitter-format-research/VOICE-ROUTING.md` first; it is the
 router and it governs this section.
@@ -161,6 +168,17 @@ Pick 5 approved lines that are closest to each post and imitate their **shape**.
    Never write the literal word "why" as a placeholder.
 5. **Blocked authors.** Never draft for anyone in `blocked_authors` (the server
    already filters these; double-check).
+5b. **The age hook is capped, and the cap is per batch, not per item.**
+   `guides/x-accounts/abhiijayvinayak.md` allows "I'm 17" only when age IS the
+   point, at most ~1 in 5 (his correction on 2026-07-10, RD-16). The 2026-09-25
+   batch put it in **all three drafts of one item** because the post happened to
+   say "when I was 17". A fact being true and being on-voice are different tests;
+   lifting an age, a number or a job title out of the post and echoing it back is
+   the tell, not the fact. At most one draft per batch may use it.
+5c. **Never repeat a rejected draft.** Read `{SIDEKICK_DATA_DIR}/rejected-drafts.json`
+   if the payload exposes it, and treat each entry's `reason` as a standing rule.
+   These are drafts he threw away by hand; producing the same shape again wastes
+   the one thing the reject button is for.
 6. **Opus judge.** A separate `model: "opus"` subagent scores every draft 1-10 on
    "would he actually type this?", quoting any tell from REJECTED-DRAFTS. Anything below
    8 gets rewritten or dropped. Put the lowest score in the job report.

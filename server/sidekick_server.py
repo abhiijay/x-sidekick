@@ -94,6 +94,14 @@ OUTREACH_FILE = os.path.join(DATA_DIR, "outreach-queue.json")
 JOBS_FILE = os.path.join(DATA_DIR, "jobs.json")
 SCOUT_FILE = os.path.join(DATA_DIR, "scout-runs.json")
 BLOCK_FILE = os.path.join(DATA_DIR, "blocklist.json")
+# Every reply he actually sends, kept outside the queue. The queue gets archived
+# and trimmed, which silently dropped 92 of 102 real sends out of the drafting
+# context; the voice corpus must not be able to lose history that way again.
+SENDS_FILE = os.path.join(DATA_DIR, "voice-sends.json")
+# Drafts he threw away, with the reason. The negative half of the voice corpus.
+REJECTS_FILE = os.path.join(DATA_DIR, "rejected-drafts.json")
+# Read-only baseline shipped in the repo, used to seed and to backfill.
+SENDS_BASELINE = os.path.join(KNOWLEDGE_DIR, "voice-corpus", "abhiijay-real-sends.json")
 WATCHLIST_FILE = env("SIDEKICK_WATCHLIST") or os.path.join(KNOWLEDGE_DIR, "tools", "x-reply-scout-watchlist.md")
 
 LEGACY_ORIGINS = ("https://x.com", "https://twitter.com", "https://pro.x.com",
@@ -348,8 +356,51 @@ def queue_update(body):
             if isinstance(body.get("note"), str):
                 i["note"] = body["note"][:500]
             save_queue(items)
+            # The learning loop: his real wording goes straight into the durable
+            # voice corpus, so it survives the queue being archived or trimmed.
+            if i.get("status") == "posted":
+                record_send(i)
             return 200, {"ok": True}
     return 404, {"error": "id not found"}
+
+
+def reject_draft(body):
+    """Drop one bad draft from an item and keep it as a negative example.
+
+    The corpus of what he sends teaches the voice; the corpus of what he throws
+    away teaches the tells. Only the first half existed.
+    """
+    item_id, idx = body.get("id"), body.get("index")
+    if not item_id or not isinstance(idx, int):
+        return 400, {"error": "id and index required"}
+    with LOCK:
+        items = load_queue()
+        it = next((i for i in items if i.get("id") == item_id), None)
+        if not it:
+            return 404, {"error": "id not found"}
+        drafts = it.get("drafts") or []
+        if idx < 0 or idx >= len(drafts):
+            return 400, {"error": "index out of range"}
+        dead = drafts.pop(idx)
+        it["drafts"] = drafts
+        if isinstance(it.get("chosen_index"), int):
+            if it["chosen_index"] == idx:
+                it.pop("chosen_index", None)
+            elif it["chosen_index"] > idx:
+                it["chosen_index"] -= 1
+        if not drafts and it.get("status") == "drafted":
+            it["status"] = "queued"          # nothing usable left; send it back
+        save_queue(items)
+
+        rejects = _load(REJECTS_FILE, "rejects")
+        rejects.insert(0, {"ts": now_str(),
+                           "post": (it.get("tweet_text") or it.get("text") or "")[:600],
+                           "author": it.get("author"),
+                           "url": it.get("tweet_url") or it.get("url"),
+                           "text": dead.get("text", ""), "angle": dead.get("angle", ""),
+                           "reason": str(body.get("reason", ""))[:300]})
+        _save(REJECTS_FILE, rejects[:2000], "rejects")
+    return 200, {"ok": True, "left": len(drafts)}
 
 
 def queue_clear_done():
@@ -568,16 +619,65 @@ def fire_routine(job, token):
     return False
 
 
+def _norm_send(t):
+    return re.sub(r"\s+", " ", (t or "").strip().lower())
+
+
+def load_sends():
+    """Accumulated real sends, seeded once from the repo baseline."""
+    sends = _load(SENDS_FILE, "sends")
+    if not sends and os.path.exists(SENDS_BASELINE):
+        try:
+            with open(SENDS_BASELINE) as fh:
+                sends = json.load(fh)
+            _save(SENDS_FILE, sends, "sends")
+            log("voice corpus seeded with %d real sends" % len(sends))
+        except Exception as e:
+            log("voice baseline load failed: %r" % e)
+            sends = []
+    return sends
+
+
+def record_send(item):
+    """Append one reply he actually sent. Called when an item is marked posted."""
+    text = (item.get("posted_text") or "").strip()
+    if not text:
+        return
+    with LOCK:
+        sends = load_sends()
+        if any(_norm_send(s.get("posted_text")) == _norm_send(text) for s in sends):
+            return
+        sends.insert(0, {"post": (item.get("tweet_text") or item.get("text") or "")[:600],
+                         "author": item.get("author"),
+                         "url": item.get("tweet_url") or item.get("url"),
+                         "posted_text": text, "ts": now_str()})
+        _save(SENDS_FILE, sends[:2000], "sends")
+
+
 def voice_examples():
-    """Recent real sends (posted_text) - the voice ground truth for drafting."""
-    out = []
+    """Real sends - the voice ground truth for drafting.
+
+    Newest first from the durable corpus, so archiving the queue can no longer
+    shrink it. The live queue is still read first in case a send has not been
+    recorded yet (e.g. posted_text edited directly in the extension).
+    """
+    out, seen = [], set()
+
+    def add(post, author, text):
+        k = _norm_send(text)
+        if not k or k in seen:
+            return
+        seen.add(k)
+        out.append({"post": (post or "")[:600], "author": author, "posted_text": text})
+
     for i in load_queue():
         if i.get("status") == "posted" and i.get("posted_text"):
-            out.append({"post": (i.get("tweet_text") or i.get("text") or "")[:600],
-                        "author": i.get("author"), "posted_text": i["posted_text"]})
+            add(i.get("tweet_text") or i.get("text"), i.get("author"), i["posted_text"])
+    for s in load_sends():
         if len(out) >= VOICE_EXAMPLES:
             break
-    return out
+        add(s.get("post"), s.get("author"), s.get("posted_text"))
+    return out[:VOICE_EXAMPLES]
 
 
 def start_draft_job(ids=None, account=None, note=""):
@@ -1176,6 +1276,8 @@ class AppHandler(BaseHandler):
                     return self._json(*unblock_handle(body))
             if path == "/api/scout/pick":
                 return self._json(*scout_pick(body))
+            if path == "/api/draft/reject":
+                return self._json(*reject_draft(body))
             if path == "/api/scout/dismiss":
                 return self._json(*scout_dismiss(body))
             if path == "/api/scout/undismiss":

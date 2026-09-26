@@ -265,6 +265,8 @@ function draftCard(it) {
     box.append(el('div', { class: 'draft-foot' },
       el('button', { class: 'voice', text: voiceLabel(d.angle), title: 'Why this reply', onclick: () => { angle.hidden = !angle.hidden; } }),
       el('span', { class: 'spacer' }),
+      el('button', { class: 'btn sm', text: 'Reject', title: 'Bad reply - drop it and record why',
+        onclick: () => rejectDraft(it, idx, d) }),
       el('button', { class: 'btn sm', text: 'Copy', onclick: async () => { pick(); toast((await copy(d.text)) ? 'Copied' : 'Copy failed', false); } }),
       el('button', { class: 'btn sm primary', text: 'Reply', onclick: async () => {
         pick();
@@ -421,6 +423,31 @@ function handleShareLaunch() {
   $('shareQueue').onclick = (e) => go(false, e.target);
   $('shareQueueDraft').onclick = (e) => go(true, e.target);
   $('shareCancel').onclick = () => { $('shareSheet').hidden = true; };
+}
+
+/* Reject one draft. The reason is the useful part: it is what turns a thrown-away
+ * draft into something the writer can learn a tell from. */
+const REJECT_REASONS = [
+  'Sounds like AI',
+  'Not his voice',
+  'Claims something untrue',
+  'Same point as another draft',
+  'Wrong read of the post',
+];
+
+function rejectDraft(it, idx, d) {
+  sheet('Reject this reply?', REJECT_REASONS.map((r) => ({
+    label: r, run: () => sendReject(it, idx, r),
+  })).concat([{ label: 'Just reject it', run: () => sendReject(it, idx, '') }]));
+}
+
+async function sendReject(it, idx, reason) {
+  try {
+    const r = await api('/api/draft/reject', { id: it.id, index: idx, reason });
+    it.drafts.splice(idx, 1);
+    toast(r.left ? 'Rejected · ' + r.left + ' left' : 'Rejected · back to waiting');
+    await refresh();
+  } catch (e) { toast(e.message, true); }
 }
 
 /* ---------------- scout ---------------- */
