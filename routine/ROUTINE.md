@@ -105,8 +105,20 @@ personal history. Voice changes style and structure only.
   tied to this post (see the voice quality rules below). Never the placeholder word "why".
   The Chrome extension shows `angle` as the draft's label on X, so this is what
   the user reads when picking.
-- The three drafts answer the **same** post with the same honest anchor. They differ
-  in register, not in facts or claims.
+- **Each voice picks its own response function and its own point.** This is the
+  whole reason for three drafts. Do not pick one angle and re-word it three times;
+  that produced the rejected 2026-09-25 batch, where Avery and Arthur both asked an
+  R7 question about the same detail and Abhiijay restated it a third time.
+  Go back to the post and ask, per voice, *what would this voice actually reply to
+  here?* Avery, Arthur and Abhiijay each latch onto a different thing in the post.
+  - The three drafts **must use three different R-moves**. Two drafts with the same
+    R-move on one item is a failed item; redo it.
+  - They may pick different details, disagree with each other, or take different
+    stances. Only the facts and claims are constrained (see the safety rule above),
+    never the angle.
+  - If two voices genuinely converge on the same point, keep the stronger one and
+    drop the other, then say so in `agent_note`. Two rewordings are worse than one
+    good reply.
 - Do not blend the voices (VOICE-ROUTING: never blend unless asked).
 - Do not mechanically add Arthur's minority markers (`bro`, `yessir`, `time to`,
   `keep going`, `wait`).
@@ -152,6 +164,28 @@ Pick 5 approved lines that are closest to each post and imitate their **shape**.
 6. **Opus judge.** A separate `model: "opus"` subagent scores every draft 1-10 on
    "would he actually type this?", quoting any tell from REJECTED-DRAFTS. Anything below
    8 gets rewritten or dropped. Put the lowest score in the job report.
+7. **Humanizer pass (mandatory, before the judge).** The repo carries the full
+   humanizer and nothing was invoking it, which is why the 2026-09-25 batch read as
+   AI. Run every draft through `guides/skill-humanizer-guide.md`, Stage 1 (strip the
+   AI tells) and Stage 3 (inject human signals), using
+   `humanizer-research/02-ai-tells-catalog.md`,
+   `humanizer-research/08-conversion-dictionary.md` and
+   `guides/humanizer-caught-tells-ledger.md`. Target reader: one person on X.
+   Skip the long-form protocol (09) - replies are far under 400 words.
+   Kill on sight, all caught tells from that batch: a reaction preamble before the
+   real content (`so real,` `fr same,` `wild ratio.` `love this,` `this is so us`),
+   `honestly` / `tbh` / `literally` as filler, tidy contrast scaffolds
+   ("not X, but Y", "some days X, other days Y"), and a closing hedge that softens
+   the point ("not sure which is smarter tbh").
+8. **Imitate the real sends.** `voice_examples` is what he actually typed and is
+   ranked above every guide when they disagree. Measured on the current set, his
+   real replies are short, ask one specific question about a concrete detail in the
+   post, open directly with no reaction phrase, mention no product, and relate
+   nothing back to himself - e.g. "which model do you use to make your Ai vids?",
+   "can you tag why a stock was added too?". The rejected batch did the opposite on
+   every count. Before sending an item, compare each draft against the closest
+   `voice_examples` entry; if it is visibly longer, warmer, or more self-referential
+   than his real sends, cut it back.
 
 3. Write results (you may send them in several batches):
 
