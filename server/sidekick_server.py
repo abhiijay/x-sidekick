@@ -855,6 +855,56 @@ def agent_write_scout(job, body):
     return 200, {"ok": True, "shortlisted": len(out)}
 
 
+def scout_dismiss(body):
+    """Hide one scout candidate without blocking its author.
+
+    Skipping a post and never wanting to hear from someone again are different
+    decisions; blocking was the only way to clear a card, which was too blunt.
+    The flag lives on the run so it survives a reload and stays scoped to it.
+    """
+    urls = {clean_tweet_url(u) for u in (body.get("urls") or [])}
+    if body.get("url"):
+        urls.add(clean_tweet_url(body["url"]))
+    urls.discard("")
+    if not urls:
+        return 400, {"error": "url or urls required"}
+    run_id = body.get("run_id")
+    with LOCK:
+        runs = load_scout_runs()
+        run = next((r for r in runs if r["id"] == run_id), runs[0] if runs else None)
+        if not run:
+            return 404, {"error": "no scout run"}
+        hit = 0
+        for key in ("shortlist", "candidates"):
+            for c in run.get(key, []):
+                if c.get("url") in urls:
+                    c["dismissed"] = True
+                    hit += 1
+        save_scout_runs(runs)
+    return 200, {"ok": True, "dismissed": hit}
+
+
+def scout_undismiss(body):
+    """Undo a skip, so a mis-tap is not permanent."""
+    urls = {clean_tweet_url(u) for u in (body.get("urls") or [])}
+    if body.get("url"):
+        urls.add(clean_tweet_url(body["url"]))
+    urls.discard("")
+    if not urls:
+        return 400, {"error": "url or urls required"}
+    with LOCK:
+        runs = load_scout_runs()
+        run = next((r for r in runs if r["id"] == body.get("run_id")), runs[0] if runs else None)
+        if not run:
+            return 404, {"error": "no scout run"}
+        for key in ("shortlist", "candidates"):
+            for c in run.get(key, []):
+                if c.get("url") in urls:
+                    c.pop("dismissed", None)
+        save_scout_runs(runs)
+    return 200, {"ok": True}
+
+
 def scout_pick(body):
     urls = {clean_tweet_url(u) for u in (body.get("urls") or [])}
     run_id = body.get("run_id")
@@ -1126,6 +1176,10 @@ class AppHandler(BaseHandler):
                     return self._json(*unblock_handle(body))
             if path == "/api/scout/pick":
                 return self._json(*scout_pick(body))
+            if path == "/api/scout/dismiss":
+                return self._json(*scout_dismiss(body))
+            if path == "/api/scout/undismiss":
+                return self._json(*scout_undismiss(body))
             return self._json(404, {"error": "not found"})
         except Exception as e:
             log("api error %s: %r" % (path, e))

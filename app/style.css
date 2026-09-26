@@ -127,6 +127,10 @@ textarea { resize: vertical; }
 .stat.gap { color: #0b0d12; background: var(--warn); font-weight: 700; }
 .stat.move { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 .summary { font-size: 14px; margin-top: 8px; color: var(--muted); }
+/* Skip one scout post without blocking its author. */
+.scout-skip { flex: none; align-self: flex-start; margin-top: 2px; background: none; border: 1px solid var(--line);
+  color: var(--muted); border-radius: 8px; padding: 4px 10px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.scout-skip:hover { color: var(--text); border-color: var(--muted); }
 
 /* list rows */
 .row-card { display: flex; gap: 10px; align-items: center; background: var(--surface); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; }
@@ -171,3 +175,5 @@ textarea { resize: vertical; }
   max-width: calc(100% - 32px); box-shadow: 0 6px 20px rgba(0,0,0,.3);
 }
 .toast.err { background: var(--err); color: #fff; }
+.toast-action { margin-left: 12px; background: none; border: none; color: inherit; font: inherit;
+  text-decoration: underline; cursor: pointer; padding: 0; }

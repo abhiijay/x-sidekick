@@ -64,13 +64,22 @@ function el(tag, props = {}, ...kids) {
 }
 
 let toastTimer;
-function toast(msg, isErr = false) {
+/* `action` is optional: {label, run} renders an inline button, used for undoing
+ * a skip. Without it this behaves exactly as before. */
+function toast(msg, isErr = false, action = null) {
   const t = $('toast');
-  t.textContent = msg;
+  t.replaceChildren(document.createTextNode(msg));
+  if (action) {
+    t.append(el('button', {
+      class: 'toast-action',
+      text: action.label,
+      onclick: () => { t.hidden = true; clearTimeout(toastTimer); action.run(); },
+    }));
+  }
   t.className = 'toast' + (isErr ? ' err' : '');
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+  toastTimer = setTimeout(() => { t.hidden = true; }, action ? 6000 : 2600);
 }
 
 function banner(msg, isErr = false) {
@@ -421,8 +430,34 @@ function scoutRows() {
   if (!run) return [];
   const blocked = new Set(state.blocked.map((b) => handleOf(b.handle).toLowerCase()));
   const rows = (run.shortlist && run.shortlist.length ? run.shortlist : run.candidates || [])
-    .filter((c) => !blocked.has(handleOf(c.author).toLowerCase()));
+    .filter((c) => !blocked.has(handleOf(c.author).toLowerCase()))
+    .filter((c) => !c.dismissed);
   return rows;
+}
+
+/* Skip one post without blocking its author. Blocking used to be the only way
+ * to clear a card, which is a much bigger decision than "not this one". */
+async function skipScout(c) {
+  const run = state.scout && state.scout.run;
+  c.dismissed = true;
+  state.picked.delete(c.url);
+  renderScout();
+  try {
+    await api('/api/scout/dismiss', { url: c.url, run_id: run && run.id });
+    toast('Skipped', false, { label: 'Undo', run: () => unskipScout(c) });
+  } catch (e) {
+    c.dismissed = false;
+    renderScout();
+    toast(e.message);
+  }
+}
+
+async function unskipScout(c) {
+  const run = state.scout && state.scout.run;
+  delete c.dismissed;
+  renderScout();
+  try { await api('/api/scout/undismiss', { url: c.url, run_id: run && run.id }); }
+  catch (e) { c.dismissed = true; renderScout(); toast(e.message); }
 }
 
 async function loadScout() {
@@ -479,13 +514,18 @@ function scoutCard(c) {
       const h = handleOf(c.author);
       sheet('@' + h, [
         { label: 'Open post on X', run: () => window.open(c.url, '_blank', 'noopener') },
+        { label: 'Skip this post', run: () => skipScout(c) },
         { label: 'Block @' + h, danger: true, run: () => blockUser(h) },
       ]);
     }),
     c.summary ? el('div', { class: 'summary', text: c.summary }) : null,
     postBlock(c.text, 'post short'),
     stats);
-  card.append(el('div', { class: 'check', text: '✓' }), body);
+  const skipBtn = el('button', {
+    class: 'scout-skip', text: 'Skip', title: 'Not this post (does not block the author)',
+    onclick: (e) => { e.stopPropagation(); skipScout(c); },
+  });
+  card.append(el('div', { class: 'check', text: '✓' }), body, skipBtn);
   card.addEventListener('click', (e) => {
     if (e.target.closest('.more-btn')) return;
     if (e.target.closest('.post')) return; // tapping text expands it
