@@ -177,15 +177,32 @@ Pick 5 approved lines that are closest to each post and imitate their **shape**.
    `honestly` / `tbh` / `literally` as filler, tidy contrast scaffolds
    ("not X, but Y", "some days X, other days Y"), and a closing hedge that softens
    the point ("not sure which is smarter tbh").
-8. **Imitate the real sends.** `voice_examples` is what he actually typed and is
-   ranked above every guide when they disagree. Measured on the current set, his
-   real replies are short, ask one specific question about a concrete detail in the
-   post, open directly with no reaction phrase, mention no product, and relate
-   nothing back to himself - e.g. "which model do you use to make your Ai vids?",
-   "can you tag why a stock was added too?". The rejected batch did the opposite on
-   every count. Before sending an item, compare each draft against the closest
-   `voice_examples` entry; if it is visibly longer, warmer, or more self-referential
-   than his real sends, cut it back.
+8. **Imitate the real sends.** `voice_examples` is what he actually typed and
+   outranks every guide when they disagree. Measured over his sends vs the rejected
+   2026-09-25 batch:
+
+   | | his real sends | rejected batch |
+   |---|---|---|
+   | median length | 47 chars / 10 words | 57 chars / 11 words |
+   | ends in a question | 40% | 23% |
+   | opens with a reaction phrase | **0%** | 7% |
+   | mentions himself or a product | 30% | 35% |
+
+   Read that table carefully, because two things in it are counter-intuitive:
+   - **He asks questions more often than the batch did, not less.** Do not treat the
+     40% cap in rule 3 as "avoid questions"; 40% is his natural rate. The cap exists
+     to stop one *template* repeating, not to suppress questions.
+   - **Length and self-reference were never the main problem.** The batch was only
+     slightly longer than he writes. Chasing brevity is not the fix.
+
+   The one absolute is the reaction opener: he uses it **0% of the time**. That, plus
+   three rewordings of one idea, is what made the batch read as AI.
+
+   His range is wider than "short question": wry jokes ("one day someone's gonna
+   write a guide for mine"), plain congrats ("congrats, i didn't even know that
+   directory existed"), flat observations ("Never seen one built just for home
+   services"), and occasionally a long multi-part question. Match that spread across
+   a batch instead of making every draft the same shape.
 
 3. Write results (you may send them in several batches):
 
