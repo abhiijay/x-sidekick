@@ -1,0 +1,261 @@
+# HANDOFF: what the X sidekick is and how it works
+
+Read this if you are a Claude picking up this project with no prior context. It
+explains the system, the decisions behind it, and the traps that have already
+cost real time. `HANDOFF-mac-setup.md` is the separate, narrower document for
+installing it on a Mac.
+
+**This repo is PUBLIC.** No password, token, or ngrok URL goes in a commit, in a
+file, or in your output. `server/.env` is gitignored and stays that way.
+
+---
+
+## 1. What it does
+
+It helps one person, Abhiijay (@abhiijayVinayak), reply well on X at volume. It
+finds posts worth replying to, drafts replies in his voice, and learns from what
+he actually sends. A human presses Reply, always.
+
+```
+scout finds posts  ->  he picks the ones worth answering  ->  Claude drafts 3
+replies per post   ->  he edits and posts one on X        ->  what he sent goes
+back into the voice corpus and the person's history
+```
+
+The interesting part is the last arrow. Everything else is plumbing.
+
+### The hard safety rule
+
+**Nothing in this system ever posts, likes, follows, replies or DMs on X.** The
+routine writes drafts to the server; the phone app and the Chrome extension copy
+text and open X; a person types and presses the button. If you are ever asked to
+automate the actual send, that is a change to the premise of the project - stop
+and ask, do not implement it.
+
+---
+
+## 2. The pieces
+
+| Piece | Where | What it is |
+|---|---|---|
+| Server | `server/sidekick_server.py` | Python 3 standard library, no dependencies. Two ports in one process. |
+| Phone app | `app/` | Installable web app (PWA). Hosted on GitHub Pages; talks to the server over ngrok. |
+| Chrome extension | *not in this repo* - lives in the workspace at `tools/x-reply-extension/` | Puts a drafts panel on x.com itself. |
+| Routine | `routine/ROUTINE.md` | What a cloud Claude session does when the server fires it. **This file is the writer's instructions - it is the highest-leverage file in the repo.** |
+| Knowledge | `knowledge/` | Voice guides, corpora, the humanizer, the scout watchlist. |
+
+**Ports.** `7781` is the legacy queue API for the Chrome extension, localhost
+only, never exposed. `7790` is the phone app, its API and the Claude callbacks;
+this is the one behind ngrok.
+
+**Three auth boundaries.** `/app/*` is public static files. `/api/*` needs the
+app password header. `/agent/*` needs a per-job bearer token that expires in 3
+hours and dies when the job calls `/done`.
+
+### How a draft job actually runs
+
+1. The app POSTs `/api/draft` with item ids.
+2. The server splits them into runs of `DRAFT_CHUNK` (20) and fires the Claude
+   Code routine API once per chunk.
+3. That cloud session reads `routine/ROUTINE.md` **from GitHub main**, then calls
+   back into this server through the ngrok URL for its payload.
+4. It writes drafts back to `/agent/job/{id}/drafts` and calls `/done`.
+
+**Consequence worth internalising: editing `ROUTINE.md` locally changes nothing.**
+The cloud session clones `main`. An unpushed improvement is an improvement that
+does not exist. Push it.
+
+---
+
+## 3. The voice system
+
+This is the heart of it, and the part most likely to be misunderstood.
+
+### Account and voice are different things
+
+From `knowledge/projects/Beamcite/twitter-format-research/VOICE-ROUTING.md`:
+**the account supplies the facts, the voice supplies only the register.** For
+`account: abhiijayVinayak` the writer produces three drafts per post, one each in
+Avery's, Arthur's and Abhiijay's own reply register. All three speak as him, on
+his verified facts. Never transfer Avery's or Arthur's life details - their
+location, age, revenue, products, relationships.
+
+### Each voice picks its own point
+
+Three drafts exist so he has three genuinely different ways in, not one idea
+worded three times. The three R-moves must differ. This was got wrong once, in
+the worst possible way - see the failure log below.
+
+### Examples outrank prose
+
+`knowledge/voice-corpus/` holds real replies: 160 of his own paired with the post
+each answered, 443 Avery, 896 Arthur. A guide *describes* a voice; a corpus *is*
+the voice. When they disagree, the corpus wins. Avery's and Arthur's parent posts
+were not in the source pulls, so their files teach register only and cannot tell
+you which move a post deserves.
+
+### The humanizer is mandatory, not optional
+
+`knowledge/guides/skill-humanizer-guide.md` plus `knowledge/humanizer-research/`
+(files 01-09). Stage 1 strips AI tells, Stage 3 injects human signals. It exists
+because drafts read as AI without it. The measured tells to kill: reaction-phrase
+openers (`so real,` `fr same,` `wild ratio.`), filler `honestly`/`tbh`, tidy
+contrast scaffolds, closing hedges.
+
+### Measured, not assumed
+
+His real sends versus a rejected batch:
+
+| | his real sends | rejected batch |
+|---|---|---|
+| median length | 47 chars / 10 words | 57 / 11 |
+| ends in a question | 40% | 23% |
+| opens with a reaction phrase | **0%** | 7% |
+| mentions himself or a product | 30% | 35% |
+
+Two of these are counter-intuitive and have already caused a wrong fix:
+**he asks questions more often than the bad batch did**, and length was never the
+real problem. The one absolute is the reaction opener. If you are about to write
+a voice rule, measure first - the numbers above came from counting, and an
+earlier version of this file stated the opposite from reading four examples.
+
+---
+
+## 4. The learning loop
+
+`voice-sends.json` in the data dir is the durable record of every reply he
+actually sent. It is seeded from `knowledge/voice-corpus/abhiijay-real-sends.json`
+and appended to whenever an item is marked posted. A draft job gets the newest
+`VOICE_EXAMPLES` (30) of them.
+
+Entries carry `verbatim`: `false` means he wrote the wording himself, `true`
+means he sent a draft untouched. **Hand-written wording outranks an accepted
+draft** - an accepted draft only proves a draft was good enough, and learning
+style from it is partly learning from this system's own output.
+
+`rejected-drafts.json` is the negative half: drafts he threw away, with a reason
+he picked from the app. Treat each reason as a standing rule.
+
+**Why it lives outside the queue.** It used to read the live queue only. The
+queue gets archived and trimmed, so 92 of 102 real sends had silently left the
+drafting context while the writer saw 10. Any future cap or cleanup must not be
+able to do that again.
+
+---
+
+## 5. People memory
+
+`people.json`: one record per builder he replies to - handle, followers, how many
+times he has replied, and the last few post/reply pairs. He replies to a bounded
+set (128 builders, 24 of them repeat contacts), so what was said last time is
+worth having.
+
+**The context guarantee, which is structural rather than a rule to remember:**
+only the authors in the current batch are ever sent, each capped to the last 3
+interactions, plus one note line that is rewritten rather than appended. A batch
+of 20 costs about 19KB whether the file holds 100 people or 10,000, and that does
+not grow the longer the system runs. Do not "improve" this by sending the whole
+file.
+
+What it is for: not re-asking a question he already asked, and earning
+familiarity from the record. Naming someone is honest at 2+ replies and false on
+a first contact. An empty record means first contact - write for a stranger.
+
+---
+
+## 6. Data files
+
+All in `SIDEKICK_DATA_DIR`, which points at the Chrome extension's data folder so
+the extension and the phone share one queue. None are in git.
+
+| File | Holds | Cap |
+|---|---|---|
+| `reply-queue.json` | The working queue: queued / drafted / posted / skipped | 500 items |
+| `voice-sends.json` | Every reply he sent (the learning loop) | 20000 |
+| `rejected-drafts.json` | Drafts he rejected, with reasons | 20000 |
+| `people.json` | Per-builder relationship memory | 1000 |
+| `scout-runs.json` | Scout candidates and shortlists | 60 runs |
+| `jobs.json` | Routine run history and job tokens | 400 |
+| `blocklist.json` | Authors never to draft for | - |
+| `outreach-queue.json` | Profiles saved for later outreach | 500 |
+
+Sizing was checked at 100 replies/day: every file stays under 10MB and every hot
+path runs in tens of milliseconds. Storage is not a constraint; batch size and
+Armory credits are.
+
+---
+
+## 7. Failures already paid for
+
+Do not rediscover these.
+
+**Three drafts that were one idea.** `ROUTINE.md` used to say the three drafts
+"answer the same post with the same honest anchor" and differ only in register.
+That is an instruction to reword one point three times, and it produced exactly
+that. Each voice must pick its own point and its own R-move.
+
+**The age hook, 3 of 3.** A post said "when I was 17" and all three drafts
+replied claiming to be 17. He *is* 17, so the fact was true - the violation was
+the rate. His own correction (RD-16) caps it at roughly 1 in 5 and only when age
+is the point. Echoing a detail out of the post back as your own is the tell, not
+the fact.
+
+**The corpus was learning from itself.** The "what you actually sent" box was
+hidden until `posted_text` already existed, so it could never be filled in, and
+marking posted stored the chosen draft as though he had sent it. 44 of 160 seeded
+entries are word-for-word a draft. Never record a draft as a send without asking.
+
+**Scout re-offered finished posts.** `queue_add` only treated a tweet as a
+duplicate while `queued` or `drafted`, so anything posted or skipped could be
+queued again and re-drafted. Every one of the 20 posts on a shortlist turned out
+to be already handled. Fixed in four places; if you touch queueing, keep all
+four.
+
+**A timed-out fire is not a failed fire.** The fire endpoint provisions a cloud
+session before answering and once took over 30s. The job was marked `failed`,
+and a failed job rejects callbacks - so the server locked out the very run it had
+just started, wasting it. Timeout is now 120s and a timeout leaves the job
+firable.
+
+**LaunchAgents cannot read `~/Documents`.** macOS TCC blocks it, so autostart
+from a workspace under Documents fails with `Operation not permitted` and an
+unhelpful `EX_CONFIG`. The server is started by hand.
+
+**ngrok's browser warning.** Loading the app through a free ngrok URL shows an
+interstitial to a real browser. That is why the app is on GitHub Pages and only
+the API goes through ngrok. Do not try to suppress the warning.
+
+---
+
+## 8. Operating it
+
+```bash
+cd server && nohup ./start.sh > sidekick.log 2>&1 &   # start
+curl -s -H "X-Sidekick-Key: $PW" localhost:7790/api/health
+```
+
+Health should show `"armory": true, "routine": true` and a watchlist count near
+505. `armory: false` means an `ARMORY_*` value is missing; `routine: false` means
+`ROUTINE_FIRE_URL` / `ROUTINE_TOKEN` are missing.
+
+**The ngrok tunnel is the fragile part.** It is started ad hoc on a free plan, so
+the URL changes if it restarts. When it does, `SIDEKICK_PUBLIC_URL` in `.env`
+*and* the routine's allowed-domains list both need the new host, or callbacks
+fail and jobs hang at `fired`.
+
+Armory (the research API the scout uses) runs on a **different machine**, reached
+over its own ngrok URL. If scouting breaks, check that machine is up before
+debugging this one.
+
+---
+
+## 9. If you are about to change something
+
+- Behaviour lives in `routine/ROUTINE.md`, and it only takes effect once pushed
+  to `main`.
+- Measure before writing a voice rule. The data is in the queue archives and
+  `voice-corpus/`; counting takes a minute and has already overturned a
+  confident wrong answer.
+- Adding to the payload is not free. Check what it costs at a batch of 20.
+- Keep the human in the loop. Every feature here assumes he reads the drafts and
+  presses the button.

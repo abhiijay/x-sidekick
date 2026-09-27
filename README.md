@@ -16,6 +16,11 @@ you press Reply yourself            Chrome extension keeps using :7781 (local on
 
 **It never posts.** Claude writes drafts and shortlists. You paste the reply and press Reply.
 
+> **New here, or an AI assistant with no context on this project?** Read
+> [HANDOFF-what-this-is.md](HANDOFF-what-this-is.md) first: what the system does,
+> how the voice and learning loops work, and the failures already paid for.
+> [HANDOFF-mac-setup.md](HANDOFF-mac-setup.md) is the narrower install guide.
+
 ## What's where
 
 | Path | What it is |
