@@ -88,6 +88,17 @@ SCOUT_WINDOW_HOURS = 24
 SCOUT_CHUNK = 10
 SCOUT_MAX_CANDIDATES = 60
 VOICE_EXAMPLES = 30
+DRAFT_CHUNK = 20            # items per routine run; keeps each payload draftable
+
+# Retention. These were sized for a handful of replies a day. At 100/day every
+# one of them went binding inside a month, and the two corpora are the ones that
+# actually hurt: dropping old sends is the same history loss that archiving the
+# queue already caused once. Files stay under 10MB and load in tens of ms at
+# these sizes, so the headroom is nearly free.
+SENDS_KEEP = 20000          # ~200 days at 100/day
+REJECTS_KEEP = 20000
+JOBS_KEEP = 400             # ~2 months at 5 chunked runs/day
+SCOUT_RUNS_KEEP = 60
 
 QUEUE_FILE = os.path.join(DATA_DIR, "reply-queue.json")
 OUTREACH_FILE = os.path.join(DATA_DIR, "outreach-queue.json")
@@ -168,7 +179,7 @@ def load_jobs():
 
 
 def save_jobs(jobs):
-    _save(JOBS_FILE, jobs[:100], "jobs")
+    _save(JOBS_FILE, jobs[:JOBS_KEEP], "jobs")
 
 
 def handle_key(value):
@@ -229,7 +240,7 @@ def load_scout_runs():
 
 
 def save_scout_runs(runs):
-    _save(SCOUT_FILE, runs[:20], "runs")
+    _save(SCOUT_FILE, runs[:SCOUT_RUNS_KEEP], "runs")
 
 
 # ---------------------------------------------------------------- X helpers
@@ -404,7 +415,7 @@ def reject_draft(body):
                            "url": it.get("tweet_url") or it.get("url"),
                            "text": dead.get("text", ""), "angle": dead.get("angle", ""),
                            "reason": str(body.get("reason", ""))[:300]})
-        _save(REJECTS_FILE, rejects[:2000], "rejects")
+        _save(REJECTS_FILE, rejects[:REJECTS_KEEP], "rejects")
     return 200, {"ok": True, "left": len(drafts)}
 
 
@@ -677,7 +688,7 @@ def record_send(item, verbatim=None):
         if verbatim is not None:
             entry["verbatim"] = bool(verbatim)
         sends.insert(0, entry)
-        _save(SENDS_FILE, sends[:2000], "sends")
+        _save(SENDS_FILE, sends[:SENDS_KEEP], "sends")
 
 
 def add_send(body):
@@ -839,6 +850,14 @@ def voice_examples():
 
 
 def start_draft_job(ids=None, account=None, note=""):
+    """Start drafting, splitting large batches across several routine runs.
+
+    One run per item is wasteful and one run for 100 items is unusable: at ~1.5KB
+    an item plus its people record, a 100-item payload is ~55K tokens before the
+    writer has read a single guide. DRAFT_CHUNK keeps each run's payload small
+    enough to draft well, and a failure then costs one chunk instead of the batch.
+    """
+    fired = []
     with LOCK:
         items = load_queue()
         blocked = blocked_set()
@@ -850,17 +869,25 @@ def start_draft_job(ids=None, account=None, note=""):
             return 400, {"error": "nothing queued to draft"}
         busy = {i["id"] for i in todo if i.get("drafting_job")}
         todo = [i for i in todo if i["id"] not in busy] or todo
-        job, token = create_job("draft", {
-            "item_ids": [i["id"] for i in todo],
-            "account": account or "",
-            "note": note[:500],
-        })
-        for i in items:
-            if i["id"] in job["payload"]["item_ids"]:
-                i["drafting_job"] = job["id"]
+        by_id = {i["id"]: i for i in items}
+        for start in range(0, len(todo), DRAFT_CHUNK):
+            chunk = todo[start:start + DRAFT_CHUNK]
+            job, token = create_job("draft", {
+                "item_ids": [i["id"] for i in chunk],
+                "account": account or "",
+                "note": note[:500],
+            })
+            for i in chunk:
+                by_id[i["id"]]["drafting_job"] = job["id"]
+            fired.append((job, token))
         save_queue(items)
-    fire_routine(job, token)
-    return 200, {"ok": True, "job": public_job(get_job(job["id"]))}
+    for job, token in fired:
+        fire_routine(job, token)
+    jobs = [public_job(get_job(j["id"])) for j, _ in fired]
+    # `job` stays the first one so existing callers keep working.
+    return 200, {"ok": True, "job": jobs[0], "jobs": jobs, "chunks": len(jobs),
+                 "items": sum(len(j["payload"]["item_ids"]) for j, _ in fired)
+                 if fired and "payload" in fired[0][0] else None}
 
 
 def scout_rank(c):
