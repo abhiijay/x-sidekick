@@ -248,7 +248,24 @@ function draftCard(it) {
   let chosen = typeof it.chosen_index === 'number' ? it.chosen_index : null;
   const sent = el('textarea', { rows: 2, placeholder: 'What you actually sent (teaches Claude your voice)' });
   if (it.posted_text) { sent.value = it.posted_text; sent.dataset.dirty = '1'; }
-  sent.addEventListener('input', () => { sent.dataset.dirty = '1'; });
+  // Auto-save: at 100 replies a day a separate Save tap per item is friction the
+  // learning loop cannot afford, and an unsaved edit teaches nothing.
+  let sentTimer;
+  const saveSent = async (quiet) => {
+    if (sent.dataset.dirty !== '1' || sent.value === (it.posted_text || '')) return;
+    const text = sent.value;
+    try {
+      await api('/api/queue/update', { id: it.id, posted_text: text, sent_verbatim: false });
+      it.posted_text = text;
+      if (!quiet) toast('Saved to your voice corpus');
+    } catch (e) { toast(e.message, true); }
+  };
+  sent.addEventListener('input', () => {
+    sent.dataset.dirty = '1';
+    clearTimeout(sentTimer);
+    sentTimer = setTimeout(() => saveSent(true), 1200);
+  });
+  sent.addEventListener('blur', () => { clearTimeout(sentTimer); saveSent(true); });
   // Always visible. This used to be hidden until posted_text already existed,
   // which meant there was no way to enter it in the first place, and "Posted"
   // silently stored the draft as if it were what he sent - teaching the writer
@@ -299,12 +316,10 @@ function draftCard(it) {
           run: () => finish(it, 'posted', undefined, chosen, e.target) },
       ]);
     } }),
-    el('button', { class: 'btn', text: 'Save text', onclick: async (e) => {
+    el('button', { class: 'btn', text: 'Save now', onclick: async (e) => {
       const done = busy(e.target, '…');
-      try {
-        await api('/api/queue/update', { id: it.id, posted_text: sent.value, sent_verbatim: false });
-        toast('Saved to your voice corpus');
-      } catch (err) { toast(err.message, true); }
+      sent.dataset.dirty = '1';
+      await saveSent(false);
       done();
     } })));
   return card;
@@ -494,7 +509,11 @@ function scoutRows() {
   const run = state.scout && state.scout.run;
   if (!run) return [];
   const blocked = new Set(state.blocked.map((b) => handleOf(b.handle).toLowerCase()));
-  const rows = (run.shortlist && run.shortlist.length ? run.shortlist : run.candidates || [])
+  // A used-up shortlist is not the same as no shortlist: falling back to raw
+  // candidates there would re-offer posts Claude deliberately did not rank.
+  const base = run.shortlist && run.shortlist.length ? run.shortlist
+    : (run.shortlist_done ? [] : run.candidates || []);
+  const rows = base
     .filter((c) => !blocked.has(handleOf(c.author).toLowerCase()))
     .filter((c) => !c.dismissed);
   return rows;
@@ -558,7 +577,13 @@ function renderScout() {
 
   const list = $('scoutList');
   if (!run) { list.replaceChildren(el('div', { class: 'empty', text: 'Run the scout to find posts worth replying to.' })); updateActionbar(); return; }
-  if (!rows.length) { list.replaceChildren(el('div', { class: 'empty', text: running ? 'Looking for posts…' : 'Nothing found in the last 24h.' })); updateActionbar(); return; }
+  if (!rows.length) {
+    const msg = running ? 'Looking for posts…'
+      : run.shortlist_done ? 'All ' + (run.handled_hidden || '') + ' posts from this run are done. Run the scout again for fresh ones.'
+      : 'Nothing found in the last 24h.';
+    list.replaceChildren(el('div', { class: 'empty', text: msg }));
+    updateActionbar(); return;
+  }
   list.replaceChildren(...rows.map(scoutCard));
   const allOn = rows.every((c) => state.picked.has(c.url));
   $('selectAll').textContent = allOn ? 'Clear' : 'Select all';

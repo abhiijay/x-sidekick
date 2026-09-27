@@ -300,10 +300,13 @@ def queue_add(body):
         if not body.get("tweet_url") or not (body.get("tweet_text") or body.get("text_missing")):
             return 400, {"error": "tweet_url and tweet_text required"}
         tid = tweet_id_from_url(body["tweet_url"])
-        dup = next((i for i in items if tid and i.get("tweet_id") == tid
-                    and i.get("status") in ("queued", "drafted")), None)
+        # Any status counts as a duplicate, not just queued/drafted. Limiting it to
+        # those two let a post he had already replied to or skipped be queued again
+        # and re-drafted from scratch.
+        dup = next((i for i in items if tid and i.get("tweet_id") == tid), None)
         if dup:
-            return 200, {"ok": True, "duplicate": True, "id": dup.get("id")}
+            return 200, {"ok": True, "duplicate": True, "id": dup.get("id"),
+                         "status": dup.get("status")}
         item = {
             "id": uuid.uuid4().hex[:8],
             "ts": now_str(),
@@ -890,6 +893,30 @@ def start_draft_job(ids=None, account=None, note=""):
                  if fired and "payload" in fired[0][0] else None}
 
 
+def handled_tweets():
+    """Every tweet already in the queue, whatever became of it.
+
+    A post he has replied to, skipped, or is mid-draft on is finished business.
+    It used to come back as a scout candidate and get queued a second time, which
+    cost a whole drafting run for a reply he had already sent.
+    """
+    ids, urls = set(), set()
+    for i in load_queue():
+        if i.get("tweet_id"):
+            ids.add(str(i["tweet_id"]))
+        u = i.get("tweet_url") or i.get("url")
+        if u:
+            urls.add(clean_tweet_url(u))
+    return ids, urls
+
+
+def is_handled(cand, ids, urls):
+    tid = cand.get("tweet_id") or tweet_id_from_url(cand.get("url") or "")
+    if tid and str(tid) in ids:
+        return True
+    return bool(cand.get("url")) and clean_tweet_url(cand["url"]) in urls
+
+
 def scout_rank(c):
     """Lower is better: fresh, uncrowded, with a bonus for a view/engagement gap."""
     bonus = 6 if c.get("high_view_low_eng") else 0
@@ -909,6 +936,7 @@ def run_scout_stage1(job_id, token):
             pass
         cutoff = datetime.now(timezone.utc) - timedelta(hours=SCOUT_WINDOW_HOURS)
         blocked = blocked_set()
+        done_ids, done_urls = handled_tweets()
         pool, errors = {}, []
         for n in range(0, len(handles), SCOUT_CHUNK):
             chunk = handles[n:n + SCOUT_CHUNK]
@@ -938,6 +966,9 @@ def run_scout_stage1(job_id, token):
                     continue
                 if author.lower() in never or author.lower() in blocked:
                     continue
+                if is_handled({"url": t["url"], "tweet_id": tweet_id_from_url(t["url"])},
+                              done_ids, done_urls):
+                    continue          # already replied to, skipped, or being drafted
                 age_h = (datetime.now(timezone.utc) - created).total_seconds() / 3600
                 cand = {
                     "url": clean_tweet_url(t["url"]),
@@ -1201,7 +1232,7 @@ def scout_pick(body):
     run = next((r for r in runs if r["id"] == run_id), runs[0] if runs else None)
     if not run or not urls:
         return 400, {"error": "run and urls required"}
-    added, ids = 0, []
+    added, ids, skipped_dupes = 0, [], []
     pool = {c["url"]: c for c in run.get("shortlist", []) + run.get("candidates", [])}
     with LOCK:
         for u in urls:
@@ -1218,9 +1249,16 @@ def scout_pick(body):
                                     "author_followers": c.get("author_followers"),
                                     "note": note, "source": "scout"})
             if resp.get("id"):
+                if resp.get("duplicate"):
+                    # Already in the queue in some state. Never hand it to a
+                    # drafting run again - that is what wasted the runs.
+                    skipped_dupes.append(resp.get("status") or "duplicate")
+                    continue
                 ids.append(resp["id"])
-                added += 0 if resp.get("duplicate") else 1
+                added += 1
     result = {"ok": True, "added": added, "ids": ids}
+    if skipped_dupes:
+        result["already_handled"] = len(skipped_dupes)
     if body.get("draft") and ids:
         code, dj = start_draft_job(ids=ids, account=body.get("account"))
         result["draft_job"] = dj.get("job")
@@ -1441,8 +1479,25 @@ class AppHandler(BaseHandler):
                 if path == "/api/jobs":
                     return self._json(200, {"jobs": [public_job(j) for j in load_jobs()[:20]]})
                 if path == "/api/scout":
-                    runs = load_scout_runs()
-                    run = runs[0] if runs else None
+                    with LOCK:
+                        runs = load_scout_runs()
+                        run = runs[0] if runs else None
+                        if run:
+                            # Hide anything since queued, replied to or skipped, so an
+                            # older run stops offering finished business.
+                            ids, urls = handled_tweets()
+                            run = dict(run)
+                            had_shortlist = bool(run.get("shortlist"))
+                            hidden = 0
+                            for k in ("shortlist", "candidates"):
+                                raw = run.get(k) or []
+                                run[k] = [c for c in raw if not is_handled(c, ids, urls)]
+                                if k == "shortlist":
+                                    hidden = len(raw) - len(run[k])
+                            run["handled_hidden"] = hidden
+                            # Tell the app the shortlist is used up rather than absent,
+                            # so it does not fall back to raw unranked candidates.
+                            run["shortlist_done"] = had_shortlist and not run["shortlist"]
                     job = get_job(run["job_id"]) if run else None
                     return self._json(200, {"run": run, "job": public_job(job) if job else None})
                 return self._json(404, {"error": "not found"})
