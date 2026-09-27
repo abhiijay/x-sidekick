@@ -603,7 +603,11 @@ def fire_routine(job, token):
     req.add_header("anthropic-version", "2023-06-01")
     req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        # The fire endpoint provisions a cloud session before it answers, which
+        # took over 30s on 2026-09-26. The old timeout gave up while the run was
+        # already starting, and the job was then marked failed - which made the
+        # server reject that run's own callbacks, wasting the whole run.
+        with urllib.request.urlopen(req, timeout=120) as r:
             resp = json.loads(r.read().decode("utf-8"))
         update_job(job["id"], status="fired", session_url=resp.get("claude_code_session_url"))
         return True
@@ -615,6 +619,13 @@ def fire_routine(job, token):
             msg += " (retry after %ss)" % retry
         update_job(job["id"], status="failed", error=msg)
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as e:
+        # A timeout is not proof the fire failed: the run may already be starting.
+        # Leave the job firable so its callbacks are still accepted, rather than
+        # marking it failed and locking out a run that is about to call back.
+        if isinstance(e, (TimeoutError, urllib.error.URLError)) and "timed out" in str(e):
+            update_job(job["id"], status="fired",
+                       error="fire response timed out; the run may still be live")
+            return True
         update_job(job["id"], status="failed", error="routine fire failed: %s" % e)
     return False
 
