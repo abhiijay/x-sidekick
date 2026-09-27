@@ -97,6 +97,16 @@
         <button class="btn primary block" id="saveSettings">Save and test</button>
         <div id="settingsResult" class="small muted"></div>
       </div>
+      <h3>Teach your voice</h3>
+      <div class="card form">
+        <div class="small muted" id="sendsCount">Replies Claude learns from: —</div>
+        <label for="sendPost">The post you replied to <span class="muted">(optional)</span></label>
+        <textarea id="sendPost" rows="2" placeholder="Paste their post, so Claude sees what you were answering"></textarea>
+        <label for="sendText">The reply you sent</label>
+        <textarea id="sendText" rows="2" placeholder="Paste your reply exactly as you sent it"></textarea>
+        <button class="btn primary block" id="addSend">Add to my voice corpus</button>
+        <div id="addSendResult" class="small muted">For replies you sent straight from X that never came through here.</div>
+      </div>
       <h3>Blocked</h3>
       <div id="blockList"></div>
       <h3>Recent Claude runs</h3>

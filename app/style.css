@@ -177,3 +177,7 @@ textarea { resize: vertical; }
 .toast.err { background: var(--err); color: #fff; }
 .toast-action { margin-left: 12px; background: none; border: none; color: inherit; font: inherit;
   text-decoration: underline; cursor: pointer; padding: 0; }
+
+/* "What you actually sent" - the learning-loop input. */
+.sent-label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); margin: 10px 0 4px; }
+.sent-edit textarea { width: 100%; box-sizing: border-box; }

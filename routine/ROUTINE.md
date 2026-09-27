@@ -222,6 +222,14 @@ Pick 5 approved lines that are closest to each post and imitate their **shape**.
    services"), and occasionally a long multi-part question. Match that spread across
    a batch instead of making every draft the same shape.
 
+   **Weight his own wording above an accepted draft.** Entries carry `verbatim`:
+   `false` means he typed or edited the wording himself, `true` means he sent a
+   draft untouched, and a missing flag means it predates the distinction. A
+   `verbatim: true` entry is evidence a draft was *good enough to send*, which is
+   weaker evidence of his voice than a line he wrote himself - learning style from
+   it is partly learning from this writer's own output. When the two disagree,
+   follow the hand-written ones.
+
 3. Write results (you may send them in several batches):
 
 ```

@@ -353,6 +353,8 @@ def queue_update(body):
                         i["chosen_index"] = body["chosen_index"]
             if isinstance(body.get("posted_text"), str):
                 i["posted_text"] = body["posted_text"][:2000]
+            if isinstance(body.get("sent_verbatim"), bool):
+                i["sent_verbatim"] = body["sent_verbatim"]
             if isinstance(body.get("note"), str):
                 i["note"] = body["note"][:500]
             save_queue(items)
@@ -649,8 +651,13 @@ def load_sends():
     return sends
 
 
-def record_send(item):
-    """Append one reply he actually sent. Called when an item is marked posted."""
+def record_send(item, verbatim=None):
+    """Append one reply he actually sent. Called when an item is marked posted.
+
+    `verbatim` says whether he sent a draft untouched (True) or typed/edited the
+    wording himself (False). His own wording is the stronger training signal, so
+    the flag is kept rather than collapsing both into one undifferentiated pile.
+    """
     text = (item.get("posted_text") or "").strip()
     if not text:
         return
@@ -658,11 +665,37 @@ def record_send(item):
         sends = load_sends()
         if any(_norm_send(s.get("posted_text")) == _norm_send(text) for s in sends):
             return
-        sends.insert(0, {"post": (item.get("tweet_text") or item.get("text") or "")[:600],
-                         "author": item.get("author"),
-                         "url": item.get("tweet_url") or item.get("url"),
-                         "posted_text": text, "ts": now_str()})
+        entry = {"post": (item.get("tweet_text") or item.get("text") or "")[:600],
+                 "author": item.get("author"),
+                 "url": item.get("tweet_url") or item.get("url"),
+                 "posted_text": text, "ts": now_str()}
+        if verbatim is None and item.get("sent_verbatim") is not None:
+            verbatim = item["sent_verbatim"]
+        if verbatim is not None:
+            entry["verbatim"] = bool(verbatim)
+        sends.insert(0, entry)
         _save(SENDS_FILE, sends[:2000], "sends")
+
+
+def add_send(body):
+    """Log a reply he sent that never went through the queue.
+
+    Replies get sent straight from X all the time. Without this the corpus only
+    ever learns from posts that happened to be queued here.
+    """
+    text = str(body.get("posted_text") or "").strip()
+    if not text:
+        return 400, {"error": "posted_text required"}
+    item = {"tweet_text": str(body.get("post") or "")[:600],
+            "author": str(body.get("author") or "")[:100],
+            "url": str(body.get("url") or "")[:500],
+            "posted_text": text[:2000]}
+    before = len(load_sends())
+    record_send(item, verbatim=False)
+    after = len(load_sends())
+    if after == before:
+        return 200, {"ok": True, "duplicate": True, "total": after}
+    return 200, {"ok": True, "total": after}
 
 
 def voice_examples():
@@ -1247,7 +1280,8 @@ class AppHandler(BaseHandler):
                     with LOCK:
                         h = health_counts()
                     h.update(armory=armory_configured(), routine=routine_configured(),
-                             watchlist=len(parse_watchlist()[0]))
+                             watchlist=len(parse_watchlist()[0]),
+                             sends=len(load_sends()))
                     return self._json(200, h)
                 if path == "/api/queue":
                     return self._json(200, {"items": load_queue()})
@@ -1287,6 +1321,8 @@ class AppHandler(BaseHandler):
                     return self._json(*unblock_handle(body))
             if path == "/api/scout/pick":
                 return self._json(*scout_pick(body))
+            if path == "/api/sends/add":
+                return self._json(*add_send(body))
             if path == "/api/draft/reject":
                 return self._json(*reject_draft(body))
             if path == "/api/scout/dismiss":

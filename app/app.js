@@ -177,6 +177,7 @@ async function refresh() {
     state.jobs = j.jobs || [];
     state.blocked = b.items || [];
     $('dot').className = 'dot ok';
+    if (h.sends != null) $('sendsCount').textContent = 'Replies Claude learns from: ' + h.sends;
     const warn = [];
     if (!h.routine) warn.push('Claude routine is not connected, so drafting is off.');
     if (!h.armory) warn.push('Armory is not connected, so scouting is off.');
@@ -248,8 +249,12 @@ function draftCard(it) {
   const sent = el('textarea', { rows: 2, placeholder: 'What you actually sent (teaches Claude your voice)' });
   if (it.posted_text) { sent.value = it.posted_text; sent.dataset.dirty = '1'; }
   sent.addEventListener('input', () => { sent.dataset.dirty = '1'; });
-  const sentWrap = el('div', { class: 'sent-edit' }, sent);
-  sentWrap.hidden = !it.posted_text;
+  // Always visible. This used to be hidden until posted_text already existed,
+  // which meant there was no way to enter it in the first place, and "Posted"
+  // silently stored the draft as if it were what he sent - teaching the writer
+  // its own output back.
+  const sentWrap = el('div', { class: 'sent-edit' },
+    el('label', { class: 'sent-label', text: 'What you actually sent' }), sent);
 
   const drafts = el('div', { class: 'drafts' });
   (it.drafts || []).forEach((d, idx) => {
@@ -280,12 +285,27 @@ function draftCard(it) {
 
   card.append(sentWrap, el('div', { class: 'card-foot' },
     el('button', { class: 'btn primary', text: 'Posted', onclick: (e) => {
-      const text = sent.value || (chosen !== null ? it.drafts[chosen].text : '');
-      finish(it, 'posted', text, chosen, e.target);
+      const typed = sent.value.trim();
+      if (typed) { finish(it, 'posted', typed, chosen, e.target, sent.dataset.dirty === '1' ? false : null); return; }
+      // Nothing typed. Ask instead of assuming the draft is what he sent - that
+      // assumption is what filled the corpus with the writer's own output.
+      const draft = chosen !== null ? it.drafts[chosen] : (it.drafts || [])[0];
+      sheet('What did you send?', [
+        ...(draft ? [{ label: 'Sent a draft word for word',
+          run: () => finish(it, 'posted', draft.text, chosen, e.target, true) }] : []),
+        { label: 'I wrote my own - let me paste it',
+          run: () => { sent.focus(); toast('Paste it, then tap Posted again'); } },
+        { label: 'Just mark posted (do not learn from it)',
+          run: () => finish(it, 'posted', undefined, chosen, e.target) },
+      ]);
     } }),
-    el('button', { class: 'btn', text: sentWrap.hidden ? 'Edit sent text' : 'Save text', onclick: async (e) => {
-      if (sentWrap.hidden) { sentWrap.hidden = false; e.target.textContent = 'Save text'; sent.focus(); return; }
-      try { await api('/api/queue/update', { id: it.id, posted_text: sent.value }); toast('Saved'); } catch (err) { toast(err.message, true); }
+    el('button', { class: 'btn', text: 'Save text', onclick: async (e) => {
+      const done = busy(e.target, '…');
+      try {
+        await api('/api/queue/update', { id: it.id, posted_text: sent.value, sent_verbatim: false });
+        toast('Saved to your voice corpus');
+      } catch (err) { toast(err.message, true); }
+      done();
     } })));
   return card;
 }
@@ -335,12 +355,13 @@ function renderReplies() {
   fill('doneList', done, doneRow, 'Nothing here yet.');
 }
 
-async function finish(it, status, postedText, chosen, btn) {
+async function finish(it, status, postedText, chosen, btn, verbatim) {
   const done = busy(btn, '…');
   try {
     const body = { id: it.id, status };
     if (typeof postedText === 'string') body.posted_text = postedText;
     if (typeof chosen === 'number') body.chosen_index = chosen;
+    if (typeof verbatim === 'boolean') body.sent_verbatim = verbatim;
     await api('/api/queue/update', body);
     toast(status === 'posted' ? 'Nice. Marked posted.' : 'Skipped');
     await refresh();
@@ -449,6 +470,23 @@ async function sendReject(it, idx, reason) {
     await refresh();
   } catch (e) { toast(e.message, true); }
 }
+
+/* Log a reply sent straight from X. Without this the corpus only ever learns
+ * from posts that happened to pass through the queue. */
+$('addSend').addEventListener('click', async (e) => {
+  const text = $('sendText').value.trim();
+  if (!text) { toast('Paste the reply you sent', true); $('sendText').focus(); return; }
+  const done = busy(e.target, 'Adding…');
+  try {
+    const r = await api('/api/sends/add', { posted_text: text, post: $('sendPost').value.trim() });
+    $('sendText').value = ''; $('sendPost').value = '';
+    $('addSendResult').textContent = r.duplicate
+      ? 'Already in your corpus.' : 'Added. Claude learns from ' + r.total + ' of your replies.';
+    toast(r.duplicate ? 'Already saved' : 'Added to your voice');
+    refresh();
+  } catch (err) { toast(err.message, true); }
+  done();
+});
 
 /* ---------------- scout ---------------- */
 
