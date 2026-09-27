@@ -20,8 +20,9 @@ Two listeners, one process (so every write goes through one lock):
 Secrets come from environment variables or a `.env` file next to this script
 (gitignored). Nothing secret is ever committed. See ../README.md.
 
-SAFETY: never posts, likes, follows or DMs on X. Claude only writes drafts and
-shortlists back into the queue; a human presses Reply.
+SAFETY: never posts, likes, follows or DMs on X, and never messages anyone on
+LinkedIn. Claude only writes drafts and shortlists back into the queue, and DM
+leads are loaded by server/dm_tool.py; a human presses Reply or Send.
 """
 import base64
 import hmac
@@ -33,6 +34,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -467,6 +469,64 @@ def outreach_add(body):
     return 200, {"ok": True, "id": item["id"]}
 
 
+def linkedin_slug(url):
+    """Profile slug from a linkedin.com/in/<slug> link, or None."""
+    m = re.search(r"linkedin\.com/in/([^/?#\s]+)", url or "", re.I)
+    if not m:
+        return None
+    slug = urllib.parse.unquote(m.group(1)).strip()
+    return slug[:100] or None
+
+
+def outreach_add_linkedin(body):
+    """A LinkedIn profile shared from the phone, saved for the next LinkedIn batch.
+
+    Same list as the X profiles (outreach-queue.json), told apart by `platform`.
+    Saving a profile never messages anyone.
+    """
+    url = str(body.get("profile_url") or body.get("url") or "")
+    slug = linkedin_slug(url)
+    if not slug:
+        return 400, {"error": "a linkedin.com/in/ profile link is required"}
+    items = load_outreach()
+    dup = next((i for i in items if i.get("platform") == "linkedin"
+                and str(i.get("handle", "")).lower() == slug.lower()
+                and i.get("status") == "queued"), None)
+    if dup:
+        return 200, {"ok": True, "duplicate": True, "id": dup.get("id")}
+    item = {
+        "id": uuid.uuid4().hex[:8],
+        "ts": now_str(),
+        "platform": "linkedin",
+        "profile_url": "https://www.linkedin.com/in/%s/" % urllib.parse.quote(slug, safe="-_.~%"),
+        "handle": slug,
+        "display_name": str(body.get("display_name", ""))[:200],
+        "bio": str(body.get("note") or body.get("bio") or "")[:1000],
+        "source": str(body.get("source") or "android_share")[:40],
+        "reason": str(body.get("reason") or "shared_from_phone")[:80],
+        "queue": "next_outreach_batch",
+        "status": "queued",
+    }
+    items.insert(0, item)
+    save_outreach(items)
+    return 200, {"ok": True, "id": item["id"]}
+
+
+def outreach_update(body):
+    """Remove a saved profile, or mark it as taken into a batch."""
+    status = body.get("status")
+    if not body.get("id") or status not in ("queued", "removed", "batched"):
+        return 400, {"error": "id and status (queued|removed|batched) required"}
+    items = load_outreach()
+    for i in items:
+        if i.get("id") == body["id"]:
+            i["status"] = status
+            i["updated_ts"] = now_str()
+            save_outreach(items)
+            return 200, {"ok": True}
+    return 404, {"error": "id not found"}
+
+
 def health_counts():
     items = load_queue()
     outreach = load_outreach()
@@ -477,6 +537,230 @@ def health_counts():
         "drafted": sum(1 for i in items if i.get("status") == "drafted"),
         "outreach_queued": sum(1 for i in outreach if i.get("status") == "queued"),
     }
+
+
+# ---------------------------------------------------------------- DM outreach (LinkedIn + X DMs)
+#
+# The reply premise, applied to first messages: Claude prepares, a person sends.
+# Leads are loaded from Cowork with server/dm_tool.py, which merges them into
+# dm-leads.json by id. Nothing here sends anything - the app copies the message
+# and opens the profile, and he presses Send in LinkedIn or X himself.
+#
+# One message per person. X leads compose theirs on the phone from a line
+# library (dm-libraries.json: hooks, proofs, CTAs and the rules for which follow
+# which), so one Shuffle tap gives a new valid message. LinkedIn leads carry the
+# written variants instead (e.g. Video pitch / Feedback ask).
+#
+# The learning loop: every message marked sent goes into dm-sends.json with the
+# exact text, whether he edited it, and which lines it came from; a reply later
+# marks that record replied. It lives outside dm-leads.json for the same reason
+# voice-sends.json lives outside the queue - trimming leads must never lose it.
+
+DM_LEADS_FILE = os.path.join(DATA_DIR, "dm-leads.json")
+DM_LIBS_FILE = os.path.join(DATA_DIR, "dm-libraries.json")
+DM_SENDS_FILE = os.path.join(DATA_DIR, "dm-sends.json")
+DM_STATE_FILE = os.path.join(DATA_DIR, "dm-state.json")
+DM_CHANNELS = ("linkedin", "x")
+DM_STATUSES = ("ready", "sent", "replied", "skipped", "cant_dm")
+DM_LEADS_MAX = 5000
+DM_SENDS_KEEP = 20000
+DM_RECENT_DAYS = 30          # sent / finished leads the app still lists
+DM_DONE_MAX = 300
+DM_TEXT_MAX = 4000
+# X answers a spam block with "Failed, try again" and blocks sending for 30+ min
+# (see the outreach deliverability rules). A failure starts this cooldown.
+DM_COOLDOWN_MIN = 30
+
+
+def load_dm_leads():
+    return _load(DM_LEADS_FILE, "leads")
+
+
+def save_dm_leads(leads):
+    _save(DM_LEADS_FILE, leads[:DM_LEADS_MAX], "leads")
+
+
+def load_dm_libraries():
+    libs = _load(DM_LIBS_FILE, "libraries")
+    return libs if isinstance(libs, dict) else {}
+
+
+def load_dm_state():
+    st = _load(DM_STATE_FILE, "state")
+    return st if isinstance(st, dict) else {}
+
+
+def save_dm_state(st):
+    _save(DM_STATE_FILE, st, "state")
+
+
+def dm_stats(leads, state):
+    today = time.strftime("%Y-%m-%d")
+    now = time.time()
+    out = {}
+    for ch in DM_CHANNELS:
+        mine = [l for l in leads if l.get("channel") == ch]
+        sent = sorted((l["sent_ts"] for l in mine if l.get("sent_ts")), reverse=True)
+        cool = ((state.get("cooldowns") or {}).get(ch) or {})
+        until = cool.get("until") or 0
+        out[ch] = {
+            "ready": sum(1 for l in mine if l.get("status") == "ready"),
+            "sent_today": sum(1 for t in sent if t.startswith(today)),
+            "last_sent_ts": sent[0] if sent else None,
+            "cooldown_until": until if until > now else None,
+            "cooldown_since": cool.get("ts") if until > now else None,
+        }
+    return out
+
+
+def dm_view():
+    """What the app shows: everything to send, plus the last month of the rest.
+
+    Only the libraries the listed leads use are sent along.
+    """
+    leads = load_dm_leads()
+    cutoff = (datetime.now() - timedelta(days=DM_RECENT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    ready = [l for l in leads if l.get("status") == "ready"]
+    recent = [l for l in leads if l.get("status") != "ready"
+              and (l.get("updated_ts") or l.get("added_ts") or "") >= cutoff]
+    recent.sort(key=lambda l: l.get("updated_ts") or "", reverse=True)
+    shown = ready + recent[:DM_DONE_MAX]
+    wanted = {l.get("library") for l in shown if l.get("library")}
+    libs = {k: v for k, v in load_dm_libraries().items() if k in wanted}
+    return {"leads": shown, "libraries": libs, "stats": dm_stats(leads, load_dm_state()),
+            "cooldown_min": DM_COOLDOWN_MIN}
+
+
+def record_dm_send(lead):
+    """Keep the message he sent. One record per lead; re-marking replaces it."""
+    text = (lead.get("sent_text") or "").strip()
+    sends = _load(DM_SENDS_FILE, "sends")
+    sends = [s for s in sends if s.get("lead_id") != lead.get("id")]
+    if text:
+        entry = {"ts": lead.get("sent_ts") or now_str(), "lead_id": lead.get("id"),
+                 "channel": lead.get("channel"), "campaign": lead.get("campaign"),
+                 "batch": lead.get("batch"), "to": lead.get("handle") or lead.get("name"),
+                 "product": lead.get("product"), "text": text,
+                 "lines": lead.get("sent_lines"), "early": bool(lead.get("sent_early"))}
+        if isinstance(lead.get("sent_verbatim"), bool):
+            entry["verbatim"] = lead["sent_verbatim"]
+        if lead.get("status") == "replied":
+            # Which first messages get answered is the most useful thing this
+            # file can teach, so the reply rides along with the send.
+            entry["replied"] = True
+            entry["reply_ts"] = lead.get("reply_ts")
+            entry["reply"] = (lead.get("reply_text") or "")[:500]
+        sends.insert(0, entry)
+    _save(DM_SENDS_FILE, sends[:DM_SENDS_KEEP], "sends")
+
+
+def forget_dm_send(lead_id):
+    sends = _load(DM_SENDS_FILE, "sends")
+    kept = [s for s in sends if s.get("lead_id") != lead_id]
+    if len(kept) != len(sends):
+        _save(DM_SENDS_FILE, kept, "sends")
+
+
+def dm_update(body):
+    """One lead changed on the phone: an edit, a shuffle, or a status move.
+
+    Status moves: ready -> sent -> replied, or ready -> skipped / cant_dm.
+    Moving back is allowed (undo), and undoing a send also drops it from
+    dm-sends.json so a mis-tap never teaches anything.
+    """
+    lid = body.get("id")
+    if not lid:
+        return 400, {"error": "id required"}
+    new = body.get("status")
+    if new is not None and new not in DM_STATUSES:
+        return 400, {"error": "unknown status"}
+    with LOCK:
+        leads = load_dm_leads()
+        lead = next((l for l in leads if l.get("id") == lid), None)
+        if not lead:
+            return 404, {"error": "id not found"}
+        ts = now_str()
+        if isinstance(body.get("draft_text"), str):
+            lead["draft_text"] = body["draft_text"][:DM_TEXT_MAX]
+        if body.get("draft_text", "") is None:
+            lead.pop("draft_text", None)          # back to the composed message
+        if "pick" in body:
+            pick = body.get("pick")
+            if isinstance(pick, dict):
+                lead["pick"] = {k: str(pick[k])[:60] for k in ("hook", "proof", "cta", "sal") if pick.get(k)}
+            elif pick is None:
+                lead.pop("pick", None)
+        if isinstance(body.get("variant_index"), int):
+            lead["variant_index"] = max(0, body["variant_index"])
+        if isinstance(body.get("note"), str):
+            lead["note"] = body["note"][:500]
+        if isinstance(body.get("reply_text"), str):
+            lead["reply_text"] = body["reply_text"][:DM_TEXT_MAX]
+        if isinstance(body.get("sent_text"), str):
+            lead["sent_text"] = body["sent_text"][:DM_TEXT_MAX]
+        if isinstance(body.get("sent_verbatim"), bool):
+            lead["sent_verbatim"] = body["sent_verbatim"]
+        if isinstance(body.get("sent_lines"), str):
+            lead["sent_lines"] = body["sent_lines"][:120]
+
+        prev = lead.get("status")
+        if new and new != prev:
+            lead["status"] = new
+            if new == "sent":
+                if prev in ("ready", "skipped", "cant_dm"):
+                    lead["sent_ts"] = ts
+                    lead["sent_early"] = bool(body.get("sent_early"))
+                lead.pop("reply_ts", None)
+            elif new == "replied":
+                lead["reply_ts"] = ts
+            elif new == "ready":
+                for k in ("sent_ts", "sent_early", "sent_verbatim", "sent_lines",
+                          "reply_ts", "skip_reason"):
+                    lead.pop(k, None)
+            elif new in ("skipped", "cant_dm"):
+                lead["skip_reason"] = str(body.get("reason") or "")[:200]
+        lead["updated_ts"] = ts
+        save_dm_leads(leads)
+
+        status = lead.get("status")
+        if status in ("sent", "replied") and (
+                new in ("sent", "replied") or isinstance(body.get("sent_text"), str)):
+            record_dm_send(lead)
+        elif new in ("ready", "skipped", "cant_dm") and prev in ("sent", "replied"):
+            forget_dm_send(lid)
+        stats = dm_stats(leads, load_dm_state())
+    return 200, {"ok": True, "lead": lead, "stats": stats}
+
+
+def dm_failed(body):
+    """X said "Failed, try again": start the cooldown for that channel."""
+    ch = body.get("channel")
+    if ch not in DM_CHANNELS:
+        return 400, {"error": "channel must be linkedin or x"}
+    minutes = body.get("minutes") if isinstance(body.get("minutes"), int) else DM_COOLDOWN_MIN
+    minutes = max(5, min(minutes, 24 * 60))
+    with LOCK:
+        st = load_dm_state()
+        st.setdefault("cooldowns", {})[ch] = {"ts": now_str(), "until": time.time() + minutes * 60,
+                                              "lead_id": str(body.get("id") or "")[:40]}
+        fails = st.setdefault("failures", [])
+        fails.insert(0, {"ts": now_str(), "channel": ch, "lead_id": str(body.get("id") or "")[:40]})
+        st["failures"] = fails[:200]
+        save_dm_state(st)
+        stats = dm_stats(load_dm_leads(), st)
+    return 200, {"ok": True, "stats": stats}
+
+
+def dm_cooldown_clear(body):
+    ch = body.get("channel")
+    if ch not in DM_CHANNELS:
+        return 400, {"error": "channel must be linkedin or x"}
+    with LOCK:
+        st = load_dm_state()
+        (st.get("cooldowns") or {}).pop(ch, None)
+        save_dm_state(st)
+        stats = dm_stats(load_dm_leads(), st)
+    return 200, {"ok": True, "stats": stats}
 
 
 # ---------------------------------------------------------------- Armory
@@ -1079,6 +1363,15 @@ def ingest_share(body):
         resp["kind"] = "outreach"
         resp["handle"] = handle
         return code, resp
+    if linkedin_slug(url):
+        # A LinkedIn profile, not a post: save it for the next LinkedIn batch.
+        with LOCK:
+            code, resp = outreach_add_linkedin({"profile_url": url, "note": note,
+                                                "source": "android_share"})
+        resp["kind"] = "outreach"
+        resp["platform"] = "linkedin"
+        resp["handle"] = linkedin_slug(url)
+        return code, resp
     if "linkedin.com" in url or "reddit.com" in url:
         platform = "linkedin" if "linkedin.com" in url else "reddit"
         text = str(body.get("text") or body.get("title") or url)
@@ -1462,10 +1755,15 @@ class AppHandler(BaseHandler):
                 if path == "/api/health":
                     with LOCK:
                         h = health_counts()
+                        dm = dm_stats(load_dm_leads(), load_dm_state())
                     h.update(armory=armory_configured(), routine=routine_configured(),
                              watchlist=len(parse_watchlist()[0]),
-                             sends=len(load_sends()))
+                             sends=len(load_sends()),
+                             dm=True, dm_ready={ch: dm[ch]["ready"] for ch in DM_CHANNELS})
                     return self._json(200, h)
+                if path == "/api/dm":
+                    with LOCK:
+                        return self._json(200, dm_view())
                 if path == "/api/queue":
                     return self._json(200, {"items": load_queue()})
                 if path == "/api/outreach":
@@ -1511,7 +1809,18 @@ class AppHandler(BaseHandler):
                     return self._json(*queue_clear_done())
             if path == "/api/outreach/add":
                 with LOCK:
+                    if linkedin_slug(str(body.get("profile_url") or body.get("url") or "")):
+                        return self._json(*outreach_add_linkedin(body))
                     return self._json(*outreach_add(body))
+            if path == "/api/outreach/update":
+                with LOCK:
+                    return self._json(*outreach_update(body))
+            if path == "/api/dm/update":
+                return self._json(*dm_update(body))
+            if path == "/api/dm/failed":
+                return self._json(*dm_failed(body))
+            if path == "/api/dm/cooldown/clear":
+                return self._json(*dm_cooldown_clear(body))
             if path == "/api/draft":
                 ids = body.get("ids") if isinstance(body.get("ids"), list) else None
                 return self._json(*start_draft_job(ids, body.get("account"), str(body.get("note") or "")))

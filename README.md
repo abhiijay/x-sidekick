@@ -85,7 +85,8 @@ Secrets never go into git. The repo is public.
 
 - **Queue a post**: in the X app, tap Share on a post and pick Sidekick. The server fetches the
   full text from Armory (about 15 credits). "Add + draft now" also starts Claude.
-- **Queue a profile for outreach**: share a profile the same way. It goes to the outreach list.
+- **Save a profile for outreach**: share an X or LinkedIn profile the same way. It goes to the Saved list
+  of the X DM or LinkedIn tab.
 - **Drafts**: "copy + open" copies the draft and opens the post in X. Paste it and press Reply.
   Then put what you actually sent in "final reply you posted" and tap **mark posted**. That
   text is what Claude learns your voice from.
@@ -93,6 +94,33 @@ Secrets never go into git. The repo is public.
   then Claude scores them. Tick the ones you want and tap "Queue ticked + draft".
   The watchlist has about 505 accounts, so each run is about 51 Armory searches. At the
   guide's ~300 credits per search that's roughly 15K credits per run. This is an estimate, not measured.
+
+## LinkedIn and X DM outreach
+
+Two more bottom tabs, **LinkedIn** and **X DM**, for sending first messages by hand from the phone.
+Same premise as replies: Claude prepares, you send.
+
+- **Batches come from Cowork.** Claude writes a batch file and loads it with
+  `python3 server/dm_tool.py --data <data dir> load batch.json` (`--dry-run` first).
+  Nothing is loaded from the phone; a profile you share from X or LinkedIn goes to that tab's **Saved** list
+  for Claude to turn into the next batch.
+- **One message per person.** X messages are built on the phone from a line library
+  (hook + proof + CTA, with the rules for which line can follow which). LinkedIn leads carry written
+  versions. **Shuffle** swaps to another valid message in one tap; the ▾ chip on X cards picks single lines.
+- **Sending.** "Copy + open" copies the message and opens the DM screen (X, when the numeric user id is
+  known) or the profile (LinkedIn). You paste and press Send. Then tap **Sent**: the exact text is saved,
+  and the app asks rather than assumes if you did not copy it from here.
+- **After.** Sent shows who is waiting. "They replied" stores their reply so Claude can draft the answer.
+  Skip and Can't DM move a lead to Done. Everything has Undo.
+- **Pacing, as warnings.** A daily cap and a random gap between sends (Settings, default 20 a day and
+  1-9 minutes). If X says "Failed, try again", mark it from the ⋯ menu: that starts a 30 minute cooldown,
+  because it means a spam block. X cards also flag a link in the message and accounts over 2k followers.
+- **Results back to Cowork.** `dm_tool.py export --since YYYY-MM-DD` prints what was sent, replied and
+  skipped, for the outreach logs. `dm_tool.py status` shows counts per batch.
+
+Data files (all in the data dir, none in git): `dm-leads.json` (the leads and their state),
+`dm-libraries.json` (line libraries), `dm-sends.json` (every first message actually sent, plus whether it
+got a reply: the learning record), `dm-state.json` (cooldowns).
 
 ## Limits
 

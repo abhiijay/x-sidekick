@@ -26,9 +26,10 @@ The interesting part is the last arrow. Everything else is plumbing.
 
 ### The hard safety rule
 
-**Nothing in this system ever posts, likes, follows, replies or DMs on X.** The
-routine writes drafts to the server; the phone app and the Chrome extension copy
-text and open X; a person types and presses the button. If you are ever asked to
+**Nothing in this system ever posts, likes, follows, replies or DMs on X, or
+messages anyone on LinkedIn.** The routine writes drafts to the server; the phone
+app and the Chrome extension copy text and open X or LinkedIn; a person types and
+presses the button. The same holds for the DM outreach tabs (section 10). If you are ever asked to
 automate the actual send, that is a change to the premise of the project - stop
 and ask, do not implement it.
 
@@ -177,7 +178,11 @@ the extension and the phone share one queue. None are in git.
 | `scout-runs.json` | Scout candidates and shortlists | 60 runs |
 | `jobs.json` | Routine run history and job tokens | 400 |
 | `blocklist.json` | Authors never to draft for | - |
-| `outreach-queue.json` | Profiles saved for later outreach | 500 |
+| `outreach-queue.json` | Profiles saved for later outreach (X and LinkedIn) | 500 |
+| `dm-leads.json` | DM outreach leads: ready / sent / replied / skipped / cant_dm | 5000 |
+| `dm-libraries.json` | Line libraries the X DM messages are built from | - |
+| `dm-sends.json` | Every first message actually sent, and whether it got a reply | 20000 |
+| `dm-state.json` | Send cooldowns after a "Failed, try again" | - |
 
 Sizing was checked at 100 replies/day: every file stays under 10MB and every hot
 path runs in tens of milliseconds. Storage is not a constraint; batch size and
@@ -259,3 +264,45 @@ debugging this one.
 - Adding to the payload is not free. Check what it costs at a batch of 20.
 - Keep the human in the loop. Every feature here assumes he reads the drafts and
   presses the button.
+
+---
+
+## 10. DM outreach: the LinkedIn and X DM tabs
+
+First messages to prospects, sent by hand from the phone. The replies premise
+carried over: Claude prepares, he sends, what he sent is kept.
+
+**Where the messages come from.** Not from the routine. Batches are built in the
+Cowork workspace from the outreach playbooks and loaded with `server/dm_tool.py
+load` (its docstring is the lead schema). The phone never creates leads; a shared
+X or LinkedIn profile only lands in that tab's Saved list for the next batch.
+
+**One message per person, one tap to change it.** He asked for this explicitly:
+the blueprints already exist, so three drafts per person is noise. X leads carry
+fields (first name, product, platform, buyer query, category) plus a library id;
+the phone builds hook + proof + CTA from `dm-libraries.json` with the same
+follow-on rules as the desktop copy boards (a hook lists the proofs that may
+follow it, a proof lists its CTAs, a hook that already promised or gave something
+rules out lines that repeat it). Defaults are seeded per lead and redrawn until no
+two waiting leads get identical text, because identical DMs at volume are what X
+throttles. LinkedIn leads carry written `variants`; Shuffle cycles them.
+
+**The learning record.** Sent stores `sent_text`, `sent_verbatim` (untouched vs
+edited) and `sent_lines` (which lines or variant). A reply later marks the same
+`dm-sends.json` record `replied` with the reply text. That file answers "which
+lines get answered", so like `voice-sends.json` it lives outside the lead list.
+Undoing a send removes its record. As with replies, Sent never assumes: if the
+text was not copied from the app, it asks what went out.
+
+**Pacing is advice, not a lock.** Daily cap and a random gap per channel (phone
+Settings). The gap is derived from the last send's timestamp, so it is the same
+on every device without storing anything. "Failed, try again" on X means a spam
+block, so marking it starts a 30 minute cooldown the phone shows in red.
+
+**No rebuild under a typing thumb.** Background refreshes (coming back from the X
+app, polling) skip a DM panel while its textarea has focus and redraw when focus
+leaves. Taps inside the panel always redraw.
+
+**Deploy note.** The app half ships through GitHub Pages (push to main); the
+server half needs a restart on the Mac. An app that reaches an older server shows
+"restart the server" in both DM tabs instead of breaking.

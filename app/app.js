@@ -127,6 +127,7 @@ function postUrl(it) { return it.tweet_url || it.url || ''; }
 
 /* Action sheet (the ⋯ menu). */
 function sheet(title, actions) {
+  $('toast').hidden = true;   // a leftover toast would cover the sheet's title
   const body = $('sheetBody');
   body.replaceChildren(el('div', { class: 'sheet-title', text: title }));
   for (const a of actions) {
@@ -140,14 +141,16 @@ $('sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') close
 
 /* ---------------- navigation ---------------- */
 
-const TITLES = { replies: 'Replies', scout: 'Scout', outreach: 'Outreach', settings: 'Settings' };
+const TITLES = { replies: 'Replies', scout: 'Scout', linkedin: 'LinkedIn', xdm: 'X DMs', settings: 'Settings' };
 function showTab(name) {
+  if (!TITLES[name]) name = 'replies';   // e.g. the old "outreach" tab saved in storage
   document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
   document.querySelectorAll('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== name; });
   $('title').textContent = TITLES[name];
   LS.set('tab', name);
   updateActionbar();
   if (name === 'scout') loadScout();
+  dmTicker();
   window.scrollTo(0, 0);
 }
 document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -171,11 +174,15 @@ async function refresh() {
     return;
   }
   try {
-    const [h, q, o, j, b] = await Promise.all([api('/api/health'), api('/api/queue'), api('/api/outreach'), api('/api/jobs'), api('/api/blocklist').catch(() => ({ items: [] }))]);
+    const [h, q, o, j, b, d] = await Promise.all([api('/api/health'), api('/api/queue'), api('/api/outreach'), api('/api/jobs'),
+      api('/api/blocklist').catch(() => ({ items: [] })),
+      // An older server has no /api/dm: the DM tabs then say it needs a restart.
+      api('/api/dm').catch((e) => ({ __error: e }))]);
     state.items = q.items || [];
     state.outreach = o.items || [];
     state.jobs = j.jobs || [];
     state.blocked = b.items || [];
+    takeDm(d);
     $('dot').className = 'dot ok';
     if (h.sends != null) $('sendsCount').textContent = 'Replies Claude learns from: ' + h.sends;
     const warn = [];
@@ -183,7 +190,7 @@ async function refresh() {
     if (!h.armory) warn.push('Armory is not connected, so scouting is off.');
     banner(warn.join(' '));
     renderReplies();
-    renderOutreach();
+    renderDmAll();
     renderSettingsLists();
     schedulePoll();
   } catch (e) {
@@ -417,8 +424,10 @@ $('clearDoneBtn').addEventListener('click', async () => {
 
 async function addLink(url, note, draft) {
   const r = await api('/api/share', { url, note });
+  const who = r.platform === 'linkedin' ? r.handle : '@' + r.handle;
+  const where = r.platform === 'linkedin' ? 'LinkedIn' : 'X DM';
   let msg = r.kind === 'outreach'
-    ? (r.duplicate ? '@' + r.handle + ' is already in outreach' : 'Added @' + r.handle + ' to outreach')
+    ? (r.duplicate ? who + ' is already saved' : 'Saved ' + who + ' (' + where + ' tab, Saved)')
     : (r.duplicate ? 'Already queued' : 'Queued');
   if (draft && r.kind === 'reply' && r.id) {
     const d = await api('/api/draft', { ids: [r.id], account: LS.get('account', 'abhiijayVinayak') });
@@ -442,11 +451,12 @@ function handleShareLaunch() {
   const m = raw.match(/https?:\/\/\S+/);
   const url = m ? m[0] : '';
   history.replaceState(null, '', location.pathname.replace(/share\/?$/, ''));
-  const isProfile = url && !/\/status\//.test(url);
+  const isProfile = url && (/linkedin\.com\/in\//i.test(url)
+    || (/(?:x|twitter)\.com\//i.test(url) && !/\/status\//.test(url)));
   $('shareSheet').hidden = false;
   $('shareUrl').textContent = url || raw || '(nothing shared)';
   $('shareQueueDraft').hidden = !!isProfile;
-  $('shareQueue').textContent = isProfile ? 'Add to outreach' : 'Just add';
+  $('shareQueue').textContent = isProfile ? 'Save for outreach' : 'Just add';
   const go = async (draft, btn) => {
     const done = busy(btn, '…');
     try {
@@ -673,15 +683,601 @@ $('scoutPick').addEventListener('click', (e) => pickScout(false, e.target));
 
 /* ---------------- outreach + settings ---------------- */
 
-function renderOutreach() {
-  const rows = state.outreach.filter((o) => o.status === 'queued');
-  $('outreachList').replaceChildren(...(rows.length ? rows.map((o) => el('div', { class: 'row-card' }, avatar(o.handle),
-    el('div', { class: 'grow' },
-      el('b', { text: '@' + o.handle }),
-      el('div', { class: 'line', text: o.bio || o.display_name || o.followers_text || '' })),
-    el('a', { class: 'link', href: o.profile_url, target: '_blank', rel: 'noopener', text: 'Open' })))
-    : [el('div', { class: 'empty', text: 'No profiles saved.' })]));
+/* ---------------- DM outreach: the LinkedIn and X DM tabs ----------------
+ * One message per person, changed with one Shuffle tap:
+ *  - X leads compose it here from a line library (hook + proof + CTA), with the
+ *    same follow-on rules as the desktop copy boards;
+ *  - LinkedIn leads carry written variants (e.g. Video pitch / Feedback ask).
+ * SAFETY: never sends. "Copy + open" puts the message on the clipboard and opens
+ * the profile or DM screen; he presses Send in LinkedIn or X himself.
+ * Learning loop: "Sent" stores the exact text that went out, and whether it was
+ * edited - asked, never assumed, same lesson as posted_text on replies.
+ * All lead text is set via textContent only.
+ */
+const DM_CH = ['linkedin', 'x'];
+const DM_NAME = { linkedin: 'LinkedIn', x: 'X' };
+const DM_SEGS = [['send', 'To send'], ['sent', 'Sent'], ['done', 'Done'], ['saved', 'Saved']];
+const dm = {
+  loaded: false, missing: false, error: '', leads: [], libs: {}, stats: {},
+  seg: { linkedin: LS.get('dmseg_linkedin', 'send'), x: LS.get('dmseg_x', 'send') },
+  camp: { linkedin: LS.get('dmcamp_linkedin', ''), x: LS.get('dmcamp_x', '') },
+  defaults: {}, pending: {}, timer: null,
+};
+
+function takeDm(d) {
+  if (d && d.__error) {
+    dm.missing = d.__error.status === 404;
+    dm.error = dm.missing ? '' : d.__error.message;
+    return;
+  }
+  dm.loaded = true; dm.missing = false; dm.error = '';
+  dm.leads = d.leads || [];
+  dm.libs = d.libraries || {};
+  dm.stats = d.stats || {};
+  buildDmDefaults();
 }
+
+/* -- pacing (warnings, never blocks) -- */
+function paceCfg(ch) {
+  const n = (k, d) => { const v = parseInt(LS.get(k, ''), 10); return Number.isFinite(v) && v >= 0 ? v : d; };
+  const min = n('gapmin', 1);
+  return { cap: n('cap_' + ch, 20) || 20, min, max: Math.max(min, n('gapmax', 9)) };
+}
+function strHash(x) { let h = 2166136261; for (let i = 0; i < x.length; i++) { h ^= x.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function tsMs(ts) { return new Date(String(ts).replace(' ', 'T')).getTime(); }
+/* The gap is derived from the last send's timestamp, so it is random but the
+ * same on every reload and every device, with nothing extra to store. */
+function nextDue(ch) {
+  const s = dm.stats[ch] || {};
+  if (!s.last_sent_ts) return 0;
+  const c = paceCfg(ch);
+  return tsMs(s.last_sent_ts) + (c.min + strHash(ch + s.last_sent_ts) % (c.max - c.min + 1)) * 60000;
+}
+function mmss(ms) { const s = Math.max(0, Math.round(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function paceState(ch) {
+  const s = dm.stats[ch] || {};
+  const c = paceCfg(ch);
+  const now = Date.now();
+  const today = (s.sent_today || 0) + '/' + c.cap + ' today';
+  if (s.cooldown_until && s.cooldown_until * 1000 > now) {
+    return { cls: 'err', text: 'Cooling down ' + mmss(s.cooldown_until * 1000 - now) + ' · ' + DM_NAME[ch] + ' said Failed. Stop the batch.', cool: true };
+  }
+  if ((s.sent_today || 0) >= c.cap) return { cls: 'warn', text: today + ' · daily cap reached, stop for today', capped: true };
+  const due = nextDue(ch);
+  if (due > now) return { cls: 'wait', text: today + ' · next one in ' + mmss(due - now), wait: due - now };
+  return { cls: 'ok', text: today + ' · ready for the next one' };
+}
+/* Returns a warning to confirm before copying, or null when it is fine to send. */
+function paceGate(ch) {
+  const p = paceState(ch);
+  if (p.cool) return { title: DM_NAME[ch] + ' blocked a send. Sending during the cooldown risks a longer block or a label.', go: 'Send anyway' };
+  if (p.capped) return { title: "That's your daily cap. More today raises the spam risk.", go: 'Send anyway' };
+  if (p.wait) return { title: 'The next one is due in ' + mmss(p.wait) + '. The random gap keeps this looking human.', go: 'Send early' };
+  return null;
+}
+function dmTicker() {
+  clearInterval(dm.timer);
+  const tab = currentTab();
+  const ch = tab === 'linkedin' ? 'linkedin' : tab === 'xdm' ? 'x' : null;
+  if (!ch) return;
+  dm.timer = setInterval(() => {
+    const box = document.querySelector('#dm-' + ch + ' .pace');
+    if (!box || document.hidden) return;
+    const p = paceState(ch);
+    box.className = 'pace ' + p.cls;
+    box.querySelector('.pace-text').textContent = p.text;
+  }, 1000);
+}
+
+/* -- the line library composer (port of the copy-board rules) -- */
+function libOf(l) { return l.library && !(l.variants && l.variants.length) ? dm.libs[l.library] || null : null; }
+function lineFits(item, l) {
+  if (!item) return true;
+  if (item.maxFollowers && (l.followers || 0) >= item.maxFollowers) return false;
+  if (item.name && !String((l.fields || {}).n || '').trim()) return false;
+  return true;
+}
+function libHooks(lib, l) { const all = Object.keys(lib.hooks); const a = all.filter((h) => lineFits(lib.hooks[h], l)); return a.length ? a : all; }
+function badProofs(lib, hook) {
+  const g = lib.hooks[hook] && lib.hooks[hook].promises;
+  return g ? Object.keys(lib.proofs).filter((k) => lib.proofs[k].promises === g) : [];
+}
+function libProofs(lib, hook, l) {
+  const bad = badProofs(lib, hook);
+  const base = (lib.hooks[hook].proofs || Object.keys(lib.proofs)).filter((x) => lib.proofs[x] && !bad.includes(x));
+  const a = base.filter((x) => lineFits(lib.proofs[x], l));
+  if (a.length) return a;
+  if (base.length) return base;
+  return Object.keys(lib.proofs).filter((x) => !bad.includes(x));
+}
+function badCtas(lib, hook) {
+  const g = lib.hooks[hook] && lib.hooks[hook].gives;
+  return g ? Object.keys(lib.ctas).filter((c) => lib.ctas[c].gives === g) : [];
+}
+function libCtas(lib, hook, proof, l) {
+  const bad = badCtas(lib, hook);
+  const ok = (x) => lib.ctas[x] && !bad.includes(x) && lineFits(lib.ctas[x], l);
+  const pc = (lib.proofs[proof] && lib.proofs[proof].ctas) || Object.keys(lib.ctas);
+  const a = pc.filter(ok);
+  const b = (lib.hooks[hook].ctas || pc).filter(ok);
+  const both = a.filter((x) => b.includes(x));
+  if (both.length) return both;
+  if (a.length) return a;
+  if (b.length) return b;
+  return pc.filter((x) => lib.ctas[x] && !bad.includes(x));
+}
+function fillLine(t, l, sal) {
+  const f = l.fields || {};
+  return String(t).split('{s}').join(sal || '').split('{p}').join(f.p || l.product || '')
+    .split('{plat}').join(f.plat || '').split('{n}').join(f.n || 'there')
+    .split('{q}').join(f.q || '').split('{cat}').join(f.cat || '');
+}
+function composeLines(lib, l, k) {
+  return [lib.hooks[k.hook].t, lib.proofs[k.proof].t, lib.ctas[k.cta].t]
+    .map((t) => fillLine(t, l, k.sal).trim()).join(lib.join === undefined ? '\n\n' : lib.join);
+}
+function seeded(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+function drawLines(lib, l, rand) {
+  const one = (a) => a[Math.floor(rand() * a.length) % a.length];
+  const hook = one(libHooks(lib, l));
+  const proof = one(libProofs(lib, hook, l));
+  const cta = one(libCtas(lib, hook, proof, l));
+  const sals = lib.salutations && lib.salutations.length ? lib.salutations : [''];
+  return { hook, proof, cta, sal: one(sals) };
+}
+function byOrder(a, b) { return (a.order || 0) - (b.order || 0) || (a.n || 0) - (b.n || 0); }
+/* Default lines per lead: seeded by the lead id, and redrawn until no two
+ * waiting leads would get byte-identical copy - identical DMs at volume are
+ * exactly what X throttles. */
+function buildDmDefaults() {
+  dm.defaults = {};
+  const seen = new Set();
+  for (const l of dm.leads.filter((x) => x.status === 'ready' && libOf(x)).sort(byOrder)) {
+    const lib = libOf(l);
+    let k = null;
+    for (let t = 0; t < 60; t++) {
+      const r = seeded(strHash(l.id + '|' + t)); r(); r();
+      k = drawLines(lib, l, r);
+      if (!seen.has(composeLines(lib, l, k))) break;
+    }
+    seen.add(composeLines(lib, l, k));
+    dm.defaults[l.id] = k;
+  }
+}
+/* The lines in use: his explicit pick over the default. A line he picked
+ * stands even if it is off-pattern; only a line that no longer exists, or
+ * one that repeats what the hook already said, is repaired. */
+function linesOf(l) {
+  const lib = libOf(l);
+  if (!lib) return null;
+  const man = l.pick || {};
+  const k = Object.assign({}, dm.defaults[l.id] || drawLines(lib, l, seeded(strHash(l.id))), man);
+  if (!lib.hooks[k.hook]) k.hook = libHooks(lib, l)[0];
+  if (!lib.proofs[k.proof] || badProofs(lib, k.hook).includes(k.proof)
+      || (!man.proof && !libProofs(lib, k.hook, l).includes(k.proof))) k.proof = libProofs(lib, k.hook, l)[0];
+  if (!lib.ctas[k.cta] || badCtas(lib, k.hook).includes(k.cta)
+      || (!man.cta && !libCtas(lib, k.hook, k.proof, l).includes(k.cta))) k.cta = libCtas(lib, k.hook, k.proof, l)[0];
+  if (k.sal === undefined) k.sal = (lib.salutations || [''])[0];
+  return k;
+}
+function baseMessage(l) {
+  if (l.variants && l.variants.length) return l.variants[(l.variant_index || 0) % l.variants.length].text || '';
+  const lib = libOf(l);
+  return lib ? composeLines(lib, l, linesOf(l)) : '';
+}
+function messageOf(l) { return typeof l.draft_text === 'string' ? l.draft_text : baseMessage(l); }
+function linesLabel(l) {
+  if (l.variants && l.variants.length) {
+    const v = l.variants[(l.variant_index || 0) % l.variants.length];
+    return (v.label || 'Message') + (l.variants.length > 1 ? ' · ' + ((l.variant_index || 0) % l.variants.length + 1) + '/' + l.variants.length : '');
+  }
+  const k = linesOf(l);
+  return k ? k.hook + ' · ' + k.proof + ' · ' + k.cta : 'Message';
+}
+function openUrl(l) {
+  if (l.channel === 'x') {
+    return l.recipient_id ? 'https://x.com/messages/compose?recipient_id=' + encodeURIComponent(l.recipient_id)
+      : 'https://x.com/' + encodeURIComponent(handleOf(l.handle));
+  }
+  return l.profile_url;
+}
+function profileUrl(l) { return l.channel === 'x' ? 'https://x.com/' + encodeURIComponent(handleOf(l.handle)) : l.profile_url; }
+function dmWho(l) { return l.channel === 'x' ? '@' + handleOf(l.handle) : (l.name || 'LinkedIn lead'); }
+/* Rule checks shown on the card. X: no link in message one, <2k followers. */
+function dmRuleWarnings(l, text) {
+  const out = [];
+  if (l.channel === 'x' && /https?:\/\/|www\.|beamcite\s*\.?\s*com/i.test(text)) out.push('Link in an X first message. X flags this as spam: move it to message two.');
+  if (l.channel === 'x' && (l.followers || 0) >= 2000) out.push(num(l.followers) + ' followers: outside the under-2k green zone, big accounts rarely see cold DMs.');
+  return out;
+}
+
+/* -- copied text is remembered across the app being killed while X is open -- */
+function setCopied(id, text, early) { LS.set('dmcopied_' + id, JSON.stringify({ text, early: !!early })); }
+function getCopied(id) { try { return JSON.parse(LS.get('dmcopied_' + id, 'null')); } catch { return null; } }
+function clearCopied(id) { try { localStorage.removeItem('sk_dmcopied_' + id); } catch { /* ignore */ } }
+
+/* -- server writes -- */
+/* Update in place, so the card handlers that hold this lead keep seeing it. */
+function mergeLead(lead, stats) {
+  const cur = dm.leads.find((x) => x.id === lead.id);
+  if (cur) {
+    for (const k of Object.keys(cur)) if (!(k in lead)) delete cur[k];
+    Object.assign(cur, lead);
+  } else dm.leads.push(lead);
+  if (stats) dm.stats = stats;
+}
+async function dmSave(l, body, quiet) {
+  try {
+    const r = await api('/api/dm/update', Object.assign({ id: l.id }, body));
+    mergeLead(r.lead, r.stats);
+    return r.lead;
+  } catch (e) { if (!quiet) toast(e.message, true); throw e; }
+}
+async function dmStatus(l, status, extra, msg, undoStatus) {
+  const prev = l.status;
+  try {
+    await dmSave(l, Object.assign({ status }, extra || {}));
+    if (status === 'sent') clearCopied(l.id);
+    buildDmDefaults();
+    renderDm(l.channel);
+    updateDmBadges();
+    toast(msg, false, { label: 'Undo', run: async () => {
+      try { await dmSave(l, { status: undoStatus || prev }); buildDmDefaults(); renderDm(l.channel); updateDmBadges(); toast('Undone'); } catch { /* toasted */ }
+    } });
+  } catch { /* toasted */ }
+}
+
+/* -- actions -- */
+async function dmCopyOpen(l, ta) {
+  const go = async (early) => {
+    const text = ta.value;
+    const ok = await copy(text);
+    setCopied(l.id, text, early);
+    toast(ok ? 'Copied. Paste it in ' + DM_NAME[l.channel] + ' and press Send.' : 'Copy failed. Long-press the text.', !ok);
+    const url = openUrl(l);
+    if (url) window.open(url, '_blank', 'noopener');
+  };
+  const gate = paceGate(l.channel);
+  if (gate) sheet(gate.title, [{ label: gate.go, run: () => go(true) }]);
+  else go(false);
+}
+
+function dmMarkSent(l, ta) {
+  const text = ta.value.trim();
+  const copied = getCopied(l.id);
+  const edited = text !== baseMessage(l).trim();
+  const base = { sent_lines: linesLabel(l), sent_early: !!(copied && copied.early) };
+  const done = (t, verbatim) => dmStatus(l, 'sent', Object.assign(base, { sent_text: t, sent_verbatim: verbatim }),
+    'Marked sent to ' + dmWho(l), 'ready');
+  if (copied && String(copied.text).trim() === text) { done(text, !edited); return; }
+  // Not copied from here (or changed since): ask. Assuming would teach the
+  // writer its own output, which is the exact failure the reply corpus hit.
+  sheet('What did you send to ' + dmWho(l) + '?', [
+    { label: 'The message in the box', run: () => done(text, !edited) },
+    { label: 'Something else - let me paste it', run: () => { ta.focus(); ta.select(); toast('Paste what you sent over it, then tap Sent'); } },
+    { label: 'Just mark sent (do not learn from it)', run: () => dmStatus(l, 'sent', { sent_lines: linesLabel(l), sent_early: base.sent_early }, 'Marked sent', 'ready') },
+  ]);
+}
+
+async function dmShuffle(l) {
+  const prev = { pick: l.pick || null, variant_index: l.variant_index || 0, draft_text: typeof l.draft_text === 'string' ? l.draft_text : null };
+  const lib = libOf(l);
+  if (l.variants && l.variants.length > 1) {
+    l.variant_index = ((l.variant_index || 0) + 1) % l.variants.length;
+  } else if (lib) {
+    const cur = messageOf(l);
+    const taken = new Set(dm.leads.filter((x) => x.status === 'ready' && x.id !== l.id).map(messageOf));
+    let k = null;
+    for (let t = 0; t < 60; t++) {
+      k = drawLines(lib, l, Math.random);
+      const txt = composeLines(lib, l, k);
+      if (txt !== cur && !taken.has(txt)) break;
+    }
+    l.pick = k;
+  } else { toast('There is only one message for ' + dmWho(l)); return; }
+  delete l.draft_text;
+  renderDm(l.channel);
+  try {
+    await dmSave(l, { pick: l.pick || null, variant_index: l.variant_index || 0, draft_text: null }, false);
+    toast('New message', false, { label: 'Undo', run: async () => {
+      l.pick = prev.pick; l.variant_index = prev.variant_index;
+      if (prev.draft_text === null) delete l.draft_text; else l.draft_text = prev.draft_text;
+      renderDm(l.channel);
+      try { await dmSave(l, prev); } catch { /* toasted */ }
+    } });
+  } catch { /* toasted */ }
+}
+
+function dmFailed(l) {
+  sheet(l.channel === 'x' ? 'X said "Failed, try again"? That is a spam block.' : 'LinkedIn warned you or hit a limit?', [
+    { label: 'Yes - stop and start the cooldown', run: async () => {
+      try {
+        const r = await api('/api/dm/failed', { channel: l.channel, id: l.id });
+        dm.stats = r.stats;
+        renderDm(l.channel);
+        toast('Cooldown started. Wait it out, then vary the copy before the next one.', true);
+      } catch (e) { toast(e.message, true); }
+    } },
+  ]);
+}
+
+function dmMenu(l) {
+  const acts = [{ label: 'Open profile', run: () => window.open(profileUrl(l), '_blank', 'noopener') }];
+  if (l.channel === 'x' && l.recipient_id) acts.push({ label: 'Open DM screen', run: () => window.open(openUrl(l), '_blank', 'noopener') });
+  if (l.status === 'ready') {
+    if (typeof l.draft_text === 'string') acts.push({ label: 'Reset my edits', run: async () => { delete l.draft_text; renderDm(l.channel); try { await dmSave(l, { draft_text: null }); } catch { /* toasted */ } } });
+    acts.push({ label: l.channel === 'x' ? 'X said "Failed, try again"' : 'LinkedIn showed a warning or limit',
+      danger: true, run: () => dmFailed(l) });
+  }
+  if (l.status === 'sent') acts.push({ label: 'Undo sent (back to To send)', run: () => dmStatus(l, 'ready', {}, 'Back in To send', 'sent') });
+  if (l.status === 'replied') acts.push({ label: 'Not a reply (back to Sent)', run: () => dmStatus(l, 'sent', {}, 'Back in Sent', 'replied') });
+  if (l.status === 'skipped' || l.status === 'cant_dm') acts.push({ label: 'Back to To send', run: () => dmStatus(l, 'ready', {}, 'Back in To send', l.status) });
+  sheet(dmWho(l) + (l.product ? ' · ' + l.product : ''), acts);
+}
+
+/* -- cards -- */
+function dmSub(l) {
+  return [l.product, l.channel === 'x' && l.followers != null ? num(l.followers) + ' followers' : null, l.meta]
+    .filter(Boolean).join(' · ');
+}
+function dmFlags(l, text) {
+  const box = el('div', { class: 'dm-flags' });
+  const add = (t, cls) => box.append(el('div', { class: 'flag' + (cls ? ' ' + cls : '') }, el('b', { text: '!' }), el('span', { text: t })));
+  if (l.drop) add('Not advised. Read the note before sending.', 'bad');
+  if (l.flag) add(l.flag);
+  if (l.note) add(l.note);
+  for (const w of dmRuleWarnings(l, text)) add(w, 'bad');
+  return box;
+}
+
+function linesPanel(l) {
+  const lib = libOf(l);
+  const k = linesOf(l);
+  const panel = el('div', { class: 'lines-panel' });
+  const make = (field, label, keys, map, allowed, deny) => {
+    const s = el('select', { 'aria-label': label });
+    const good = keys.filter((x) => allowed.includes(x) && !deny.includes(x));
+    const rest = keys.filter((x) => !good.includes(x) && !deny.includes(x));
+    for (const x of good) s.append(el('option', { value: x, text: map ? (map[x].label || x) : x }));
+    if (rest.length) {
+      const g = el('optgroup', { label: 'off-pattern, still sendable' });
+      for (const x of rest) g.append(el('option', { value: x, text: '· ' + (map ? (map[x].label || x) : x) }));
+      s.append(g);
+    }
+    s.value = k[field];
+    s.addEventListener('change', async () => {
+      const np = Object.assign({}, k, { [field]: s.value });
+      // A new hook or proof can rule out what followed it: let those refill.
+      if (field === 'hook' && !libProofs(lib, np.hook, l).includes(np.proof)) delete np.proof;
+      if ((field === 'hook' || field === 'proof') && np.proof
+          && !libCtas(lib, np.hook, np.proof, l).includes(np.cta)) delete np.cta;
+      l.pick = np;
+      l.pick = linesOf(l);
+      delete l.draft_text;
+      s.blur();
+      renderDm(l.channel, l.id);
+      try { await dmSave(l, { pick: l.pick, draft_text: null }, false); } catch { /* toasted */ }
+    });
+    return el('label', { class: 'line-pick' }, el('span', { text: label }), s);
+  };
+  const hooks = Object.keys(lib.hooks);
+  panel.append(
+    make('hook', 'Hook', hooks, lib.hooks, libHooks(lib, l), []),
+    make('proof', 'Proof', Object.keys(lib.proofs), lib.proofs, libProofs(lib, k.hook, l), badProofs(lib, k.hook)),
+    make('cta', 'Ask', Object.keys(lib.ctas), lib.ctas, libCtas(lib, k.hook, k.proof, l), badCtas(lib, k.hook)));
+  if (lib.salutations && lib.salutations.length > 1) {
+    panel.append(make('sal', 'Hi', lib.salutations, null, lib.salutations, []));
+  }
+  return panel;
+}
+
+function dmSendCard(l, isNext, openLines) {
+  const text = messageOf(l);
+  const card = el('div', { class: 'card dm-card' + (isNext ? ' next' : '') + (l.drop ? ' drop' : ''), 'data-lead': l.id });
+  const tags = el('div', { class: 'tagrow' });
+  if (isNext) tags.append(el('span', { class: 'tag next', text: 'Next' }));
+  if (l.batch) tags.append(el('span', { class: 'tag', text: l.batch + (l.n ? ' · #' + l.n : '') }));
+  if (l.drop) tags.append(el('span', { class: 'tag bad', text: 'Not advised' }));
+  card.append(whoRow(l.channel === 'x' ? handleOf(l.handle) : (l.name || '?'), dmSub(l), () => dmMenu(l)), tags);
+  if (l.channel === 'linkedin') card.querySelector('.who-name b').textContent = l.name || 'LinkedIn lead';
+
+  let flags = dmFlags(l, text);
+  card.append(flags);
+
+  const ta = el('textarea', { class: 'dm-msg', rows: 8, spellcheck: 'true' });
+  ta.value = text;
+  const count = el('span', { class: 'chars', text: text.trim().length + ' chars' });
+  let saveTimer;
+  const saveDraft = async () => {
+    const v = ta.value;
+    const body = v === baseMessage(l) ? { draft_text: null } : { draft_text: v };
+    if ((body.draft_text ?? null) === (typeof l.draft_text === 'string' ? l.draft_text : null)) return;
+    if (body.draft_text === null) delete l.draft_text; else l.draft_text = v;
+    try { await dmSave(l, body, true); } catch { /* quiet autosave */ }
+  };
+  ta.addEventListener('input', () => {
+    count.textContent = ta.value.trim().length + ' chars';
+    const nf = dmFlags(l, ta.value);
+    flags.replaceWith(nf);
+    flags = nf;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveDraft, 1000);
+  });
+  ta.addEventListener('blur', () => { clearTimeout(saveTimer); saveDraft(); });
+
+  const lib = libOf(l);
+  const label = el('button', { class: 'voice', text: linesLabel(l) + (lib ? ' ▾' : ''), title: lib ? 'Change single lines' : 'Which message this is' });
+  const panel = lib ? linesPanel(l) : null;
+  if (panel) {
+    panel.hidden = !openLines;
+    label.addEventListener('click', () => { panel.hidden = !panel.hidden; });
+  }
+  card.append(el('div', { class: 'dm-meta' }, label, el('span', { class: 'spacer' }), count));
+  if (panel) card.append(panel);
+  card.append(ta);
+
+  const canShuffle = (l.variants && l.variants.length > 1) || !!lib;
+  card.append(el('div', { class: 'dm-row' },
+    canShuffle ? el('button', { class: 'btn', text: '↻ Shuffle', title: 'Another message', onclick: () => dmShuffle(l) }) : null,
+    el('button', { class: 'btn', text: 'Copy', onclick: async () => {
+      const ok = await copy(ta.value); setCopied(l.id, ta.value, false);
+      toast(ok ? 'Copied' : 'Copy failed. Long-press the text.', !ok);
+    } }),
+    el('button', { class: 'btn primary grow', text: 'Copy + open ' + DM_NAME[l.channel], onclick: () => dmCopyOpen(l, ta) })));
+  card.append(el('div', { class: 'dm-row' },
+    el('button', { class: 'btn ok grow', text: '✓ Sent', onclick: () => dmMarkSent(l, ta) }),
+    el('button', { class: 'btn', text: l.channel === 'x' ? "Can't DM" : "Can't message",
+      onclick: () => dmStatus(l, 'cant_dm', { reason: 'messages closed' }, dmWho(l) + ': can’t message, moved to Done', 'ready') }),
+    el('button', { class: 'btn', text: 'Skip', onclick: () => dmStatus(l, 'skipped', { reason: 'skipped on phone' }, 'Skipped ' + dmWho(l), 'ready') })));
+  return card;
+}
+
+function dmSentCard(l) {
+  const card = el('div', { class: 'card dm-card slim' });
+  card.append(whoRow(l.channel === 'x' ? handleOf(l.handle) : (l.name || '?'),
+    'sent ' + agoText(l.sent_ts) + (l.product ? ' · ' + l.product : '') + (l.sent_early ? ' · early' : ''), () => dmMenu(l)));
+  if (l.channel === 'linkedin') card.querySelector('.who-name b').textContent = l.name || 'LinkedIn lead';
+  card.append(postBlock(l.sent_text || '(sent text not recorded)', 'post short'));
+  const replyBox = el('div', { class: 'reply-box' });
+  replyBox.hidden = true;
+  const rt = el('textarea', { rows: 3, placeholder: 'Paste their reply (optional, helps Claude draft your answer)' });
+  replyBox.append(rt, el('div', { class: 'dm-row' },
+    el('button', { class: 'btn primary grow', text: 'Save reply', onclick: () => dmStatus(l, 'replied', { reply_text: rt.value.trim() }, dmWho(l) + ' replied, moved to Done', 'sent') }),
+    el('button', { class: 'btn', text: 'Cancel', onclick: () => { replyBox.hidden = true; } })));
+  card.append(replyBox, el('div', { class: 'dm-row' },
+    el('button', { class: 'btn grow', text: 'They replied', onclick: () => { replyBox.hidden = false; rt.focus(); } }),
+    el('button', { class: 'btn', text: 'Open', onclick: () => window.open(openUrl(l), '_blank', 'noopener') })));
+  return card;
+}
+
+const DONE_TEXT = { replied: 'replied', skipped: 'skipped', cant_dm: "couldn't message" };
+function dmDoneRow(l) {
+  const line = l.status === 'replied' ? (l.reply_text || 'replied') : (l.skip_reason || l.product || '');
+  return el('div', { class: 'row-card' }, avatar(l.channel === 'x' ? handleOf(l.handle) : l.name),
+    el('div', { class: 'grow' },
+      el('b', { text: dmWho(l) + ' · ' + (DONE_TEXT[l.status] || l.status) }),
+      el('div', { class: 'line', text: line })),
+    el('button', { class: 'more-btn', text: '⋯', onclick: () => dmMenu(l) }));
+}
+
+function savedRow(o) {
+  const li = o.platform === 'linkedin';
+  return el('div', { class: 'row-card' }, avatar(o.handle),
+    el('div', { class: 'grow' },
+      el('b', { text: li ? (o.display_name || o.handle) : '@' + o.handle }),
+      el('div', { class: 'line', text: o.bio || o.display_name || o.followers_text || ('saved ' + agoText(o.ts)) })),
+    el('a', { class: 'link', href: o.profile_url, target: '_blank', rel: 'noopener', text: 'Open' }),
+    el('button', { class: 'more-btn', text: '⋯', onclick: () => sheet(li ? o.handle : '@' + o.handle, [
+      { label: 'Remove from saved', danger: true, run: async () => {
+        try { await api('/api/outreach/update', { id: o.id, status: 'removed' }); o.status = 'removed'; renderDmAll(); toast('Removed'); }
+        catch (e) { toast(e.message, true); }
+      } }]) }));
+}
+
+/* -- panel -- */
+function renderDm(ch, keepLinesOpenFor) {
+  const root = $('dm-' + ch);
+  if (!root) return;
+  dm.pending[ch] = false;
+  const saved = state.outreach.filter((o) => (o.platform || 'x') === ch && o.status === 'queued');
+  const nodes = [];
+  if (dm.missing || dm.error) {
+    nodes.push(el('div', { class: 'empty', text: dm.missing
+      ? 'The sidekick server on your Mac is an older version. Restart it (server/start.sh) to turn on outreach.'
+      : 'Could not load outreach: ' + dm.error }));
+    root.replaceChildren(...nodes);
+    return;
+  }
+  const mine = dm.leads.filter((l) => l.channel === ch);
+  const camps = [...new Set(mine.filter((l) => l.status === 'ready' || l.status === 'sent').map((l) => l.campaign))].filter(Boolean);
+  if (dm.camp[ch] && !camps.includes(dm.camp[ch])) dm.camp[ch] = '';
+  const inCamp = (l) => !dm.camp[ch] || l.campaign === dm.camp[ch];
+  const ready = mine.filter((l) => l.status === 'ready' && inCamp(l)).sort(byOrder);
+  const sent = mine.filter((l) => l.status === 'sent' && inCamp(l)).sort((a, b) => (b.sent_ts || '').localeCompare(a.sent_ts || ''));
+  // Replies first: those are the ones that still need an answer.
+  const done = mine.filter((l) => ['replied', 'skipped', 'cant_dm'].includes(l.status) && inCamp(l))
+    .sort((a, b) => ((b.status === 'replied') - (a.status === 'replied'))
+      || (b.updated_ts || '').localeCompare(a.updated_ts || ''));
+
+  const p = paceState(ch);
+  nodes.push(el('div', { class: 'pace ' + p.cls },
+    el('span', { class: 'pace-dot' }), el('span', { class: 'pace-text', text: p.text }),
+    p.cool ? el('button', { class: 'link', text: 'Clear', onclick: () => sheet('End the cooldown early?', [{ label: 'Yes, ' + DM_NAME[ch] + ' is sending again', run: async () => {
+      try { const r = await api('/api/dm/cooldown/clear', { channel: ch }); dm.stats = r.stats; renderDm(ch); } catch (e) { toast(e.message, true); }
+    } }]) }) : null));
+
+  if (camps.length > 1) {
+    const chips = el('div', { class: 'chips dm-chips' });
+    for (const [val, label] of [['', 'All'], ...camps.map((c) => [c, c.replace(/-/g, ' ')])]) {
+      chips.append(el('button', { class: 'chip' + (dm.camp[ch] === val ? ' on' : ''), text: label, onclick: () => {
+        dm.camp[ch] = val; LS.set('dmcamp_' + ch, val); renderDm(ch);
+      } }));
+    }
+    nodes.push(chips);
+  }
+
+  const counts = { send: ready.length, sent: sent.length, done: 0, saved: saved.length };
+  const seg = el('div', { class: 'dseg', role: 'tablist' });
+  for (const [key, label] of DM_SEGS) {
+    seg.append(el('button', { class: dm.seg[ch] === key ? 'on' : '', onclick: () => {
+      dm.seg[ch] = key; LS.set('dmseg_' + ch, key); renderDm(ch); window.scrollTo(0, 0);
+    } }, label + ' ', counts[key] ? el('b', { text: String(counts[key]) }) : null));
+  }
+  nodes.push(seg);
+
+  const which = dm.seg[ch];
+  if (which === 'send') {
+    nodes.push(el('p', { class: 'hint', text: ch === 'x'
+      ? 'Open the profile first: check the product and that their DMs are open. One DM, one gap, then the next. Stop the batch if X ever says Failed.'
+      : 'Check the chat first. If an older message already went out, change the first line before you send.' }));
+    if (!ready.length) {
+      nodes.push(el('div', { class: 'empty', text: dm.loaded
+        ? 'Nothing to send. Ask Claude in Cowork to load the next ' + DM_NAME[ch] + ' batch into the sidekick.'
+        : 'Loading…' }));
+    }
+    ready.forEach((l, i) => nodes.push(dmSendCard(l, i === 0, keepLinesOpenFor === l.id)));
+  } else if (which === 'sent') {
+    nodes.push(el('p', { class: 'hint', text: 'Waiting on a reply. Tap "They replied" when one comes in, and paste it so Claude can draft your answer.' }));
+    nodes.push(...(sent.length ? sent.map(dmSentCard) : [el('div', { class: 'empty', text: 'Nothing sent in the last 30 days.' })]));
+  } else if (which === 'done') {
+    nodes.push(...(done.length ? done.map(dmDoneRow) : [el('div', { class: 'empty', text: 'Replies, skips and closed DMs land here.' })]));
+  } else {
+    nodes.push(el('p', { class: 'hint', text: 'Profiles you share from the ' + DM_NAME[ch] + ' app land here. Claude turns them into the next batch.' }));
+    nodes.push(...(saved.length ? saved.map(savedRow) : [el('div', { class: 'empty', text: 'No profiles saved.' })]));
+  }
+  root.replaceChildren(...nodes);
+}
+
+DM_CH.forEach((ch) => $('dm-' + ch).addEventListener('focusout', () => {
+  // Wait past the tap that moved focus, so its click lands before any rebuild.
+  setTimeout(() => { if (dm.pending[ch] && !typingIn(ch)) renderDm(ch); }, 400);
+}));
+
+function updateDmBadges() {
+  $('navLi').textContent = dm.leads.filter((l) => l.channel === 'linkedin' && l.status === 'ready').length || '';
+  $('navX').textContent = dm.leads.filter((l) => l.channel === 'x' && l.status === 'ready').length || '';
+}
+function typingIn(ch) {
+  const a = document.activeElement;
+  return !!a && $('dm-' + ch).contains(a) && /^(TEXTAREA|INPUT)$/.test(a.tagName);
+}
+/* Background refreshes (returning from X, polling) go through here. They never
+ * rebuild a panel under a thumb that is typing; that waits for focus to leave.
+ * A tap inside the panel calls renderDm directly and always redraws. */
+function renderDmAll() {
+  DM_CH.forEach((ch) => { if (typingIn(ch)) dm.pending[ch] = true; else renderDm(ch); });
+  updateDmBadges();
+}
+
+/* -- pacing settings -- */
+[['capX', 'cap_x', 20], ['capLi', 'cap_linkedin', 20], ['gapMin', 'gapmin', 1], ['gapMax', 'gapmax', 9]].forEach(([id, key, d]) => {
+  $(id).value = LS.get(key, String(d));
+  $(id).addEventListener('change', () => {
+    const v = parseInt($(id).value, 10);
+    if (Number.isFinite(v) && v >= 0) LS.set(key, String(v)); else $(id).value = LS.get(key, String(d));
+    renderDmAll();
+  });
+});
 
 const JOB_TEXT = { created: 'starting', fired: 'started', working: 'working', fetching: 'fetching', scoring: 'scoring', done: 'done', failed: 'failed' };
 function renderSettingsLists() {
@@ -736,6 +1332,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
 handleShareLaunch();
+renderDmAll();
 const startTab = LS.get('tab', 'replies');
 showTab(startTab === 'settings' && LS.get('password') ? 'replies' : startTab);
 refresh();

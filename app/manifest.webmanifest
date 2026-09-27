@@ -1,7 +1,7 @@
 {
   "name": "X reply sidekick",
   "short_name": "Sidekick",
-  "description": "Queue X posts, get Claude-drafted replies, scout reply targets. Never posts by itself.",
+  "description": "Queue X posts, get Claude-drafted replies, scout reply targets, and work LinkedIn and X DM outreach batches. Never posts or sends by itself.",
   "id": "./",
   "start_url": "./",
   "scope": "./",

@@ -74,11 +74,9 @@
       <div id="scoutList"></div>
     </section>
 
-    <!-- OUTREACH -->
-    <section data-panel="outreach" hidden>
-      <p class="hint">Profiles saved for the next outreach batch. Share a profile from X to add one.</p>
-      <div id="outreachList"></div>
-    </section>
+    <!-- DM OUTREACH: built by app.js (renderDm), one panel per channel -->
+    <section data-panel="linkedin" hidden><div class="dm" id="dm-linkedin"></div></section>
+    <section data-panel="xdm" hidden><div class="dm" id="dm-x"></div></section>
 
     <!-- SETTINGS -->
     <section data-panel="settings" hidden>
@@ -96,6 +94,16 @@
         </select>
         <button class="btn primary block" id="saveSettings">Save and test</button>
         <div id="settingsResult" class="small muted"></div>
+      </div>
+      <h3>Outreach pacing</h3>
+      <div class="card form">
+        <div class="pace-grid">
+          <label>X DMs a day<input id="capX" type="number" inputmode="numeric" min="1" max="200"></label>
+          <label>LinkedIn a day<input id="capLi" type="number" inputmode="numeric" min="1" max="200"></label>
+          <label>Gap from (min)<input id="gapMin" type="number" inputmode="numeric" min="0" max="120"></label>
+          <label>Gap to (min)<input id="gapMax" type="number" inputmode="numeric" min="0" max="240"></label>
+        </div>
+        <div class="small muted">Warnings, not blocks. After each send the app picks a random gap in this range before the next one is due. Unwarmed X accounts: stay under about 20 cold DMs a day.</div>
       </div>
       <h3>Teach your voice</h3>
       <div class="card form">
@@ -122,7 +130,8 @@
   <nav class="tabbar">
     <button data-tab="replies" class="on"><span class="ico">✎</span>Replies<i id="navBadge"></i></button>
     <button data-tab="scout"><span class="ico">⌕</span>Scout</button>
-    <button data-tab="outreach"><span class="ico">☺</span>Outreach</button>
+    <button data-tab="linkedin"><span class="ico li">in</span>LinkedIn<i id="navLi"></i></button>
+    <button data-tab="xdm"><span class="ico">✉</span>X DM<i id="navX"></i></button>
     <button data-tab="settings"><span class="ico">⚙</span>Settings</button>
   </nav>
 
