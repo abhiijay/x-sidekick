@@ -100,6 +100,8 @@ BLOCK_FILE = os.path.join(DATA_DIR, "blocklist.json")
 SENDS_FILE = os.path.join(DATA_DIR, "voice-sends.json")
 # Drafts he threw away, with the reason. The negative half of the voice corpus.
 REJECTS_FILE = os.path.join(DATA_DIR, "rejected-drafts.json")
+# One bounded record per builder he replies to. See the people section below.
+PEOPLE_FILE = os.path.join(DATA_DIR, "people.json")
 # Read-only baseline shipped in the repo, used to seed and to backfill.
 SENDS_BASELINE = os.path.join(KNOWLEDGE_DIR, "voice-corpus", "abhiijay-real-sends.json")
 WATCHLIST_FILE = env("SIDEKICK_WATCHLIST") or os.path.join(KNOWLEDGE_DIR, "tools", "x-reply-scout-watchlist.md")
@@ -362,6 +364,7 @@ def queue_update(body):
             # voice corpus, so it survives the queue being archived or trimmed.
             if i.get("status") == "posted":
                 record_send(i)
+                record_person(i)
             return 200, {"ok": True}
     return 404, {"error": "id not found"}
 
@@ -698,6 +701,117 @@ def add_send(body):
     return 200, {"ok": True, "total": after}
 
 
+# ---------------------------------------------------------------- people
+#
+# He replies to the same bounded set of builders, so what was said last time is
+# worth remembering. The danger is obvious: a per-person log that only ever grows
+# will eventually dominate the drafting context. Three limits keep it flat:
+#
+#   1. Only the authors in THIS job are ever sent. A batch of 11 items carries at
+#      most 11 records, no matter how many people are on file.
+#   2. Each record keeps the last PERSON_HISTORY interactions on disk and sends
+#      only PERSON_HISTORY_SENT of them, each truncated.
+#   3. The rolling `note` is one short line, rewritten rather than appended, so it
+#      cannot creep. Nothing here grows with how long the system has been running.
+
+PERSON_HISTORY = 8          # kept on disk per person
+PERSON_HISTORY_SENT = 3     # sent to the writer per person
+PERSON_POST_CHARS = 160
+PERSON_REPLY_CHARS = 140
+PERSON_NOTE_CHARS = 200
+PEOPLE_MAX = 1000           # disk cap; context is bounded separately
+PERSON_STALE_DAYS = 365     # one-off contacts older than this are prunable
+
+
+def load_people():
+    return _load(PEOPLE_FILE, "people")
+
+
+def person_key(author):
+    return handle_key(author)
+
+
+def record_person(item):
+    """Upsert the author of one posted item, keeping their history bounded."""
+    key = person_key(item.get("author"))
+    if not key:
+        return
+    with LOCK:
+        people = load_people()
+        rec = next((p for p in people if p.get("key") == key), None)
+        if not rec:
+            rec = {"key": key, "handle": str(item.get("author") or "").lstrip("@"),
+                   "first_seen": now_str(), "replies": 0, "history": [], "note": ""}
+            people.append(rec)
+        if item.get("author_followers"):
+            rec["followers"] = item["author_followers"]
+        rec["last_seen"] = now_str()
+        rec["replies"] = rec.get("replies", 0) + 1
+        entry = {"ts": now_str(),
+                 "post": (item.get("tweet_text") or item.get("text") or "")[:PERSON_POST_CHARS],
+                 "reply": (item.get("posted_text") or "")[:PERSON_REPLY_CHARS]}
+        if item.get("tweet_url") or item.get("url"):
+            entry["url"] = item.get("tweet_url") or item.get("url")
+        # Newest first, capped. Old interactions fall off rather than accumulate.
+        rec["history"] = ([entry] + rec.get("history", []))[:PERSON_HISTORY]
+        _save(PEOPLE_FILE, prune_people(people), "people")
+
+
+def prune_people(people):
+    """Keep the file from growing forever.
+
+    This is disk hygiene, not a context control - the context is already bounded
+    by only ever sending the current batch's authors. Someone replied to once,
+    long ago, is not a relationship worth remembering; repeat contacts are kept
+    regardless of age.
+    """
+    if len(people) <= PEOPLE_MAX:
+        return people
+    cutoff = (datetime.now() - timedelta(days=PERSON_STALE_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    keep = [p for p in people
+            if (p.get("replies") or 0) > 1 or (p.get("last_seen") or "") >= cutoff]
+    if len(keep) <= PEOPLE_MAX:
+        return keep
+    return sorted(keep, key=lambda p: (p.get("last_seen") or ""), reverse=True)[:PEOPLE_MAX]
+
+
+def people_for(authors):
+    """Bounded records for just these authors - never the whole file."""
+    want = {person_key(a) for a in authors if person_key(a)}
+    if not want:
+        return []
+    out = []
+    for p in load_people():
+        if p.get("key") not in want:
+            continue
+        out.append({"handle": p.get("handle"), "followers": p.get("followers"),
+                    "replies": p.get("replies", 0), "last_seen": p.get("last_seen"),
+                    "note": (p.get("note") or "")[:PERSON_NOTE_CHARS],
+                    "history": p.get("history", [])[:PERSON_HISTORY_SENT]})
+    return out
+
+
+def update_person_notes(notes):
+    """Let the writer keep one short line per person. Rewritten, never appended."""
+    if not isinstance(notes, list):
+        return 0
+    n = 0
+    with LOCK:
+        people = load_people()
+        by_key = {p.get("key"): p for p in people}
+        for entry in notes:
+            if not isinstance(entry, dict):
+                continue
+            rec = by_key.get(person_key(entry.get("handle")))
+            if not rec:
+                continue
+            rec["note"] = str(entry.get("note", ""))[:PERSON_NOTE_CHARS]
+            n += 1
+        if n:
+            _save(PEOPLE_FILE, people, "people")
+    return n
+
+
 def voice_examples():
     """Real sends - the voice ground truth for drafting.
 
@@ -926,6 +1040,8 @@ def agent_job_payload(job):
         return {"job_id": job["id"], "kind": "draft", "account": job["payload"].get("account"),
                 "note": job["payload"].get("note"), "items": items,
                 "voice_examples": voice_examples(),
+                # Only the authors in this batch, so this cannot grow over time.
+                "people": people_for(i.get("author") for i in items),
                 "blocked_authors": sorted(blocked_set()),
                 "write_to": "/agent/job/%s/drafts" % job["id"]}
     run = next((r for r in load_scout_runs() if r["job_id"] == job["id"]), None)
@@ -939,6 +1055,8 @@ def agent_write_drafts(job, body):
     results = body.get("items")
     if not isinstance(results, list):
         return 400, {"error": "items list required"}
+    # One short rewritten line per person; it replaces, so it cannot creep.
+    noted = update_person_notes(body.get("people_notes"))
     allowed = set(job["payload"].get("item_ids", []))
     written, skipped = 0, 0
     with LOCK:
@@ -967,7 +1085,7 @@ def agent_write_drafts(job, body):
                 skipped += 1
             it.pop("drafting_job", None)
         save_queue(items)
-    return 200, {"ok": True, "written": written, "skipped": skipped}
+    return 200, {"ok": True, "written": written, "skipped": skipped, "people_noted": noted}
 
 
 def agent_write_scout(job, body):
@@ -1287,6 +1405,10 @@ class AppHandler(BaseHandler):
                     return self._json(200, {"items": load_queue()})
                 if path == "/api/outreach":
                     return self._json(200, {"items": load_outreach()})
+                if path == "/api/people":
+                    with LOCK:
+                        return self._json(200, {"people": sorted(
+                            load_people(), key=lambda p: -(p.get("replies") or 0))})
                 if path == "/api/blocklist":
                     return self._json(200, {"items": load_blocklist()})
                 if path == "/api/jobs":
