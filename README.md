@@ -120,7 +120,13 @@ Same premise as replies: Claude prepares, you send.
 
 ### LinkedIn: Connect and Message
 
-The LinkedIn tab has two lists at the top:
+The LinkedIn tab opens **one person at a time**: a big card, the buttons in a bar at thumb height
+(Open LinkedIn, then Request sent / Couldn't; or Copy + open, then Sent), and the next person slides in
+after each mark, with Undo. "List" shows everyone grouped by tier, with search. The chips under the switch
+show today's count against the cap, the session ("+ Session" picks how many for this sitting), and
+"+ Find more".
+
+It has two lists at the top:
 
 - **Connect**: profiles to send a connection request to, best tier first. Tap *Open LinkedIn*, send a
   plain request, come back, tap *Requested*. In *Requested*, tap *Accepted* when they accept: the person

@@ -151,6 +151,9 @@ function showTab(name) {
   updateActionbar();
   if (name === 'scout') loadScout();
   dmTicker();
+  // The LinkedIn action bar belongs to that tab only.
+  if (name === 'linkedin' && typeof renderDm === 'function' && dm.loaded) renderDm('linkedin');
+  else if (typeof setDmActions === 'function') setDmActions(null);
   window.scrollTo(0, 0);
 }
 document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -811,8 +814,14 @@ function dmTicker() {
   const ch = tab === 'linkedin' ? 'linkedin' : tab === 'xdm' ? 'x' : null;
   if (!ch) return;
   dm.timer = setInterval(() => {
+    if (document.hidden) return;
+    const nx = ch === 'linkedin' && document.querySelector('#dm-linkedin .li-next');
+    if (nx) {
+      const w = paceState('linkedin', 'message').wait;
+      nx.textContent = w ? 'Next in ' + mmss(w) : 'Ready for the next';
+    }
     const box = document.querySelector('#dm-' + ch + ' .pace');
-    if (!box || document.hidden) return;
+    if (!box) return;
     const p = paceState(ch);
     box.className = 'pace ' + p.cls;
     box.querySelector('.pace-text').textContent = p.text;
@@ -970,6 +979,7 @@ async function dmStatus(l, status, extra, msg, undo) {
   const undoBody = undo && typeof undo === 'object' ? undo : { status: undo || prev };
   try {
     await dmSave(l, Object.assign({ status }, extra || {}));
+    dm.opened.delete(l.id);
     if (status === 'sent') clearCopied(l.id);
     buildDmDefaults();
     renderDm(l.channel);
@@ -987,6 +997,8 @@ async function dmCopyOpen(l, ta) {
     const ok = await copy(text);
     setCopied(l.id, text, early);
     toast(ok ? 'Copied. Paste it in ' + DM_NAME[l.channel] + ' and press Send.' : 'Copy failed. Long-press the text.', !ok);
+    dm.opened.add(l.id);
+    if (l.channel === 'linkedin') renderDm('linkedin');   // bar switches to "Sent"
     const url = openUrl(l);
     if (url) window.open(url, '_blank', 'noopener');
   };
@@ -1239,6 +1251,7 @@ function connectOpen(l, card) {
   const go = () => {
     dm.opened.add(l.id);
     if (card) card.classList.add('opened');
+    else renderDm('linkedin');   // focus view: the bar switches to "Request sent"
     window.open(l.profile_url, '_blank', 'noopener');
   };
   const gate = paceGate('linkedin', 'connect');
@@ -1277,9 +1290,10 @@ function requestedRow(l) {
   const age = daysSince(l.requested_ts);
   const stale = age !== null && age >= 21;
   return el('div', { class: 'row-card' + (stale ? ' stale' : '') }, avatar(l.name),
-    el('div', { class: 'grow' },
-      el('b', { text: (l.name || '?') + (l.product ? ' · ' + l.product : '') }),
-      el('div', { class: 'line', text: 'requested ' + agoText(l.requested_ts) + (stale ? ' · 3+ weeks, consider withdrawing it' : '') })),
+    el('div', { class: 'row-text grow' },
+      el('b', { text: l.name || '?' }),
+      el('span', { class: 'line', text: [l.product, 'requested ' + agoText(l.requested_ts),
+        stale ? '3+ weeks, consider withdrawing it' : null].filter(Boolean).join(' · ') })),
     el('button', { class: 'btn sm ok', text: 'Accepted', onclick: () => dmStatus(l, 'accepted', {},
       (l.name || 'They') + ' accepted. Now in Message.', { kind: 'connect', status: 'requested' }) }),
     el('button', { class: 'more-btn', text: '⋯', onclick: () => connectMenu(l) }));
@@ -1401,11 +1415,487 @@ function segBar(segs, current, counts, onPick) {
   return seg;
 }
 
+/* ================= LinkedIn tab: one person at a time =================
+ * The LinkedIn work is the same small loop over and over: open a profile,
+ * connect, come back, mark it; or copy a message, send it, come back, mark it.
+ * So the default view is a focus deck: one person on a big card, the buttons
+ * in a bar at thumb height above the tab bar, and after each mark the next
+ * person slides in. Every mark has Undo. The full list is one tap away.
+ */
+const li = {
+  view: { connect: LS.get('li_view_connect', 'focus'), message: LS.get('li_view_message', 'focus') },
+  focus: { connect: null, message: null }, idx: { connect: 0, message: 0 },
+  q: '', showNeeds: false,
+};
+const TIER_GROUPS = [['Contact this week', 0], ['Next batch', 1], ['Later', 2], ['No tier', 3]];
+function tierRank(t) { return TIER_RANK[t] ?? 3; }
+
+function setDmActions(nodes) {
+  const bar = $('dmActions');
+  const show = nodes && nodes.length && currentTab() === 'linkedin';
+  bar.hidden = !show;
+  bar.replaceChildren(...(show ? nodes : []));
+  document.body.classList.toggle('with-actionbar', !!show);
+}
+
+/* A sheet with custom content (the plain sheet() only takes buttons). */
+function sheetCustom(title, nodes) {
+  $('toast').hidden = true;
+  const body = $('sheetBody');
+  body.replaceChildren(el('div', { class: 'sheet-title', text: title }), ...nodes,
+    el('button', { text: 'Cancel', onclick: closeSheet }));
+  $('sheet').hidden = false;
+}
+
+function numberPicker(values, current, onPick, noun) {
+  const grid = el('div', { class: 'sheet-grid' });
+  for (const n of values) {
+    grid.append(el('button', { class: n === current ? 'on' : '', text: String(n), onclick: () => onPick(n) }));
+  }
+  const inp = el('input', { type: 'number', inputmode: 'numeric', min: 1, max: 500, placeholder: 'Or type a number' });
+  const go = el('button', { class: 'btn primary', text: 'Set', onclick: () => {
+    const v = parseInt(inp.value, 10);
+    if (Number.isFinite(v) && v > 0) onPick(v); else toast('Type how many ' + noun, true);
+  } });
+  return [grid, el('div', { class: 'sheet-row' }, inp, go)];
+}
+
+function openSessionSheet(ch, mode) {
+  const noun = mode === 'connect' ? 'requests' : 'messages';
+  const cur = sessionOf(ch, mode);
+  const set = (n) => {
+    closeSheet();
+    setSession(ch, mode, n);
+    renderDm(ch);
+    toast(n ? 'Session: ' + n + ' ' + noun + '. The counter starts now.' : 'Session cleared');
+  };
+  const nodes = numberPicker([5, 10, 15, 20, 25, 30, 40, 50], cur && cur.target, set, noun);
+  if (cur) nodes.push(el('button', { class: 'danger', text: 'Clear session', onclick: () => set(0) }));
+  sheetCustom('How many ' + noun + ' this session?', nodes);
+}
+
+function openFindSheet() {
+  const ch = 'linkedin';
+  const camps = Object.entries(dm.campaigns).filter(([, v]) => (v.channels || DM_CH).includes(ch));
+  if (!camps.length) { toast('Set up the campaign rules in Cowork first', true); return; }
+  let camp = camps.some(([k]) => k === LS.get('find_camp_' + ch)) ? LS.get('find_camp_' + ch) : camps[0][0];
+  const campSeg = el('div', { class: 'sheet-seg' });
+  const drawCamps = () => campSeg.replaceChildren(...camps.map(([k, v]) => el('button', {
+    class: k === camp ? 'on' : '', text: v.label || k, onclick: () => { camp = k; LS.set('find_camp_' + ch, k); drawCamps(); } })));
+  drawCamps();
+  const run = async (n) => {
+    closeSheet();
+    LS.set('find_want_' + ch, String(n));
+    try {
+      await api('/api/leads/find', { campaign: camp, channel: ch, want: n });
+      toast('Looking for ' + n + '. Takes a few minutes, keep working.');
+    } catch (e) { toast(e.message, true); }
+    loadFind();
+  };
+  // Pick a number, then press Find: tapping a number alone never starts a run.
+  let want = parseInt(LS.get('find_want_' + ch, '20'), 10) || 20;
+  const grid = el('div', { class: 'sheet-grid' });
+  const other = el('input', { type: 'number', inputmode: 'numeric', min: 1, max: 100, placeholder: 'Other number' });
+  const go = el('button', { class: 'btn primary block find-go', onclick: () => run(want) });
+  const draw = () => {
+    grid.replaceChildren(...[10, 20, 30, 50].map((n) => el('button', { class: n === want ? 'on' : '', text: String(n),
+      onclick: () => { want = n; other.value = ''; draw(); } })));
+    go.textContent = 'Find ' + want + ' people';
+  };
+  other.addEventListener('input', () => {
+    const v = parseInt(other.value, 10);
+    if (Number.isFinite(v) && v > 0) { want = Math.min(v, 100); draw(); }
+  });
+  draw();
+  const status = findStatusText(ch);
+  sheetCustom('Find more people to connect with', [
+    el('div', { class: 'sheet-label', text: 'For' }), campSeg,
+    el('div', { class: 'sheet-label', text: 'How many' }), grid,
+    el('div', { class: 'sheet-row' }, other),
+    el('div', { class: 'sheet-row' }, go),
+    el('div', { class: 'sheet-note', text: 'Fresh launches from Peerlist, Uneed and Fazier. Only makers who listed their own LinkedIn, product site checked, nobody you already contacted. Claude checks the fit before they show up here, in a few minutes.' }),
+    status ? el('div', { class: 'sheet-note', text: 'Last run: ' + status }) : null,
+  ].filter(Boolean));
+}
+
+function findStatusText(ch) {
+  const run = dm.find && dm.find.run;
+  const job = dm.find && dm.find.job;
+  if (!run || run.channel !== ch || !job) return '';
+  const busy = ACTIVE.includes(job.status);
+  if (busy) return (FIND_TEXT[job.status] || job.status) + (job.progress ? ' · ' + job.progress : '');
+  if (job.error) return 'failed: ' + job.error;
+  return (run.added_count ? 'added ' + run.added_count : 'nothing added') + ' · ' + agoText(run.ts);
+}
+
+/* One row of chips: today's count, the session, and Find more. */
+function liStatus(mode) {
+  const s = dm.stats.linkedin || {};
+  const c = paceCfg('linkedin', mode);
+  const p = paceState('linkedin', mode);
+  const done = mode === 'connect' ? (s.requested_today || 0) : (s.sent_today || 0);
+  const ss = sessionOf('linkedin', mode);
+  const row = el('div', { class: 'li-status' });
+  row.append(el('button', { class: 'pill-chip' + (done >= c.cap ? ' warn' : ''), onclick: () => showTab('settings'),
+    text: 'Today ' + done + '/' + c.cap }));
+  row.append(el('button', { class: 'pill-chip' + (p.sessionDone ? ' ok' : ss ? ' accent' : ''), onclick: () => openSessionSheet('linkedin', mode),
+    text: ss && ss.target ? 'Session ' + sessionCount('linkedin', mode, ss) + '/' + ss.target : '+ Session' }));
+  if (mode === 'message' && p.wait) row.append(el('span', { class: 'pill-chip li-next', text: 'Next in ' + mmss(p.wait) }));
+  if (mode === 'connect') {
+    const job = dm.find && dm.find.job;
+    const busy = job && ACTIVE.includes(job.status) && dm.find.run && dm.find.run.channel === 'linkedin';
+    row.append(el('button', { class: 'pill-chip find' + (busy ? ' busy' : ''), onclick: openFindSheet,
+      text: busy ? 'Finding…' : '+ Find more' }));
+  }
+  const nodes = [row];
+  if (p.capped) {
+    nodes.push(el('div', { class: 'li-warn', text: mode === 'connect'
+      ? "That's " + done + ' requests today. LinkedIn signed you out after about 82 on Sep 28, so stop here for today.'
+      : "That's your daily message cap. More today raises the spam risk." }));
+  } else if (p.sessionDone) {
+    nodes.push(el('div', { class: 'li-warn ok', text: 'Session done: ' + ss.target + ' ' + (mode === 'connect' ? 'requests' : 'messages') + '. Nice.' }));
+  }
+  if (mode === 'connect') {
+    const t = findStatusText('linkedin');
+    const job = dm.find && dm.find.job;
+    if (t && job && (ACTIVE.includes(job.status) || Date.now() - tsMs(dm.find.run.ts) < 3 * 3600e3)) {
+      nodes.push(el('button', { class: 'find-line', onclick: openFindSheet, text: 'Find more: ' + t }));
+    }
+  }
+  return nodes;
+}
+
+function liPill(text, cls) { return text ? el('span', { class: 'tier-pill ' + (cls || ''), text }) : null; }
+function tierPill(t) { return t ? liPill(t, 'tier-' + tierRank(t)) : null; }
+function campPill(c) { return c ? liPill((dm.campaigns[c] && dm.campaigns[c].label) || c, 'camp') : null; }
+
+function pickFocus(mode, list) {
+  if (!list.length) { li.focus[mode] = null; return -1; }
+  let i = list.findIndex((l) => l.id === li.focus[mode]);
+  if (i < 0) i = Math.min(li.idx[mode], list.length - 1);
+  li.focus[mode] = list[i].id;
+  li.idx[mode] = i;
+  return i;
+}
+function focusOn(mode, id) {
+  li.focus[mode] = id;
+  li.view[mode] = 'focus';
+  LS.set('li_view_' + mode, 'focus');
+  renderDm('linkedin');
+  window.scrollTo(0, 0);
+}
+
+function viewToggle(mode, count) {
+  const seg = el('div', { class: 'mini-seg' },
+    ...[['focus', 'One by one'], ['list', 'List' + (count ? ' (' + count + ')' : '')]].map(([v, label]) =>
+      el('button', { class: li.view[mode] === v ? 'on' : '', text: label, onclick: () => {
+        li.view[mode] = v; LS.set('li_view_' + mode, v); renderDm('linkedin'); window.scrollTo(0, 0);
+      } })));
+  return seg;
+}
+
+function campFilterChip(camps) {
+  if (camps.length < 2) return null;
+  const cur = dm.camp.linkedin;
+  const label = cur ? ((dm.campaigns[cur] && dm.campaigns[cur].label) || cur) : 'All';
+  return el('button', { class: 'pill-chip small', text: label + ' ▾', onclick: () => sheet('Show', [
+    { label: 'All campaigns', run: () => { dm.camp.linkedin = ''; LS.set('dmcamp_linkedin', ''); renderDm('linkedin'); } },
+    ...camps.map((c) => ({ label: (dm.campaigns[c] && dm.campaigns[c].label) || c,
+      run: () => { dm.camp.linkedin = c; LS.set('dmcamp_linkedin', c); renderDm('linkedin'); } })),
+  ]) });
+}
+
+/* A search box over a list. Typing only redraws the results under it, so the
+ * keyboard stays up. */
+function searchable(placeholder, draw) {
+  const inp = el('input', { class: 'search', type: 'search', placeholder, value: li.q });
+  const results = el('div', { class: 'results' });
+  const fill = () => {
+    const out = draw();
+    results.replaceChildren(...(out.length ? out : [el('div', { class: 'empty', text: li.q ? 'No match.' : 'Nobody here yet.' })]));
+  };
+  inp.addEventListener('input', () => { li.q = inp.value; clearTimeout(li.qTimer); li.qTimer = setTimeout(fill, 150); });
+  fill();
+  return [inp, results];
+}
+function matches(l) {
+  const q = li.q.trim().toLowerCase();
+  return !q || [l.name, l.product, l.headline, l.tagline].some((x) => String(x || '').toLowerCase().includes(q));
+}
+
+function upNext(mode, list, from) {
+  const next = list.slice(from + 1, from + 4);
+  if (!next.length) return null;
+  return el('div', { class: 'up-next' }, el('div', { class: 'tier-head', text: 'Up next' }),
+    ...next.map((l) => el('button', { class: 'next-row', onclick: () => focusOn(mode, l.id) },
+      el('b', { text: l.name || '?' }), el('span', { class: 'muted', text: ' ' + (l.product || '') }),
+      tierPill(l.tier))));
+}
+
+function focusHeader(i, total, l) {
+  return el('div', { class: 'focus-top' },
+    el('span', { class: 'focus-count', text: (i + 1) + ' of ' + total }), tierPill(l.tier), campPill(l.campaign));
+}
+function focusFacts(l) {
+  const facts = [l.score != null && l.score !== '' ? 'Score ' + l.score : null, l.icp || null, l.source || null,
+    l.launch ? 'Launched ' + l.launch : null, l.batch || null].filter(Boolean);
+  return facts.length ? el('div', { class: 'focus-facts' }, ...facts.map((f) => el('span', { class: 'fact', text: f }))) : null;
+}
+function focusNav(mode, list, i) {
+  return el('div', { class: 'focus-nav' },
+    el('button', { class: 'link', text: '‹ Previous', disabled: i === 0, onclick: () => { li.focus[mode] = list[i - 1].id; renderDm('linkedin'); } }),
+    el('button', { class: 'link', text: 'Later ›', title: 'Leave this one for later and show the next', onclick: () => {
+      li.focus[mode] = list[(i + 1) % list.length].id; renderDm('linkedin'); } }));
+}
+
+/* -- Connect: one profile at a time -- */
+function connectFocus(list, nodes) {
+  const i = pickFocus('connect', list);
+  if (i < 0) {
+    nodes.push(el('div', { class: 'empty' }, el('div', { text: 'Nobody left to connect with.' }),
+      el('button', { class: 'btn primary', text: '+ Find more people', onclick: openFindSheet })));
+    setDmActions(null);
+    return;
+  }
+  const l = list[i];
+  const opened = dm.opened.has(l.id);
+  const card = el('div', { class: 'card focus-card' + (opened ? ' opened' : '') });
+  card.append(focusHeader(i, list.length, l),
+    el('div', { class: 'focus-name', text: l.name || 'LinkedIn profile' }),
+    l.product ? el('div', { class: 'focus-product', text: l.product }) : null);
+  // Right under the name, so it is in view the moment he comes back from LinkedIn.
+  if (opened) card.append(el('div', { class: 'focus-hint', text: "Sent the request? Tap Request sent. If LinkedIn wouldn't let you, tap Couldn't." }));
+  if (l.headline) card.append(el('div', { class: 'focus-line', text: l.headline }));
+  if (l.tagline) card.append(el('div', { class: 'focus-line muted', text: l.tagline }));
+  card.append(dmFlags(l, ''));
+  const facts = focusFacts(l);
+  if (facts) card.append(facts);
+  card.append(focusNav('connect', list, i));
+  nodes.push(card);
+  const nx = upNext('connect', list, i);
+  if (nx) nodes.push(nx);
+  setDmActions(opened ? [
+    el('button', { class: 'btn ok-solid grow', text: '✓ Request sent', onclick: () => dmStatus(l, 'requested', {}, 'Request sent to ' + (l.name || ''), 'ready') }),
+    el('button', { class: 'btn', text: "Couldn't", onclick: () => dmStatus(l, 'cant_dm', { reason: "couldn't connect" }, 'Moved to Done', 'ready') }),
+    el('button', { class: 'btn icon', text: '↗', title: 'Open LinkedIn again', onclick: () => connectOpen(l) }),
+  ] : [
+    el('button', { class: 'btn primary grow', text: 'Open LinkedIn ↗', onclick: () => connectOpen(l) }),
+    el('button', { class: 'btn', text: 'Skip', onclick: () => dmStatus(l, 'skipped', { reason: 'skipped on phone' }, 'Skipped ' + (l.name || ''), 'ready') }),
+    el('button', { class: 'btn icon', text: '⋯', onclick: () => connectMenu(l) }),
+  ]);
+}
+
+function compactRow(l, onTap, right) {
+  return el('div', { class: 'row-card tap' },
+    el('button', { class: 'row-main', onclick: onTap },
+      avatar(l.name),
+      el('span', { class: 'row-text' },
+        el('b', { text: l.name || '?' }),
+        el('span', { class: 'line', text: [l.product, l.score != null && l.score !== '' ? 'score ' + l.score : null].filter(Boolean).join(' · ') }))),
+    right || null);
+}
+
+function groupedByTier(list, rowFn) {
+  const out = [];
+  for (const [label, rank] of TIER_GROUPS) {
+    const group = list.filter((l) => Math.min(tierRank(l.tier), 3) === rank);
+    if (!group.length) continue;
+    out.push(el('div', { class: 'tier-head', text: label + ' · ' + group.length }), ...group.map(rowFn));
+  }
+  return out;
+}
+
+function connectList(list, nodes) {
+  setDmActions(null);
+  // In the list, the row's button follows the same two steps as the focus
+  // view: Open, then (once opened) Sent.
+  nodes.push(...searchable('Search a name or product', () => groupedByTier(list.filter(matches), (l) =>
+    compactRow(l, () => focusOn('connect', l.id), dm.opened.has(l.id)
+      ? el('button', { class: 'btn sm ok-solid', text: '✓ Sent', onclick: () => dmStatus(l, 'requested', {}, 'Request sent to ' + (l.name || ''), 'ready') })
+      : el('button', { class: 'btn sm', text: 'Open ↗', onclick: () => connectOpen(l, null) })))));
+}
+
+function requestedList(list, nodes) {
+  setDmActions(null);
+  nodes.push(el('p', { class: 'hint', text: 'When LinkedIn says someone accepted, find them here and tap Accepted. They move to Message.' }));
+  nodes.push(...searchable('Search who accepted', () => list.filter(matches).map(requestedRow)));
+}
+
+/* -- Message: one message at a time -- */
+function messageBox(l) {
+  const ta = el('textarea', { class: 'dm-msg', rows: 8, spellcheck: 'true' });
+  ta.value = messageOf(l);
+  const count = el('span', { class: 'chars', text: ta.value.trim().length + ' chars' });
+  let timer;
+  const save = async () => {
+    const v = ta.value;
+    const body = v === baseMessage(l) ? { draft_text: null } : { draft_text: v };
+    if ((body.draft_text ?? null) === (typeof l.draft_text === 'string' ? l.draft_text : null)) return;
+    if (body.draft_text === null) delete l.draft_text; else l.draft_text = v;
+    try { await dmSave(l, body, true); } catch { /* quiet autosave */ }
+  };
+  ta.addEventListener('input', () => { count.textContent = ta.value.trim().length + ' chars'; clearTimeout(timer); timer = setTimeout(save, 1000); });
+  ta.addEventListener('blur', () => { clearTimeout(timer); save(); });
+  return { ta, count };
+}
+
+function variantChips(l) {
+  if (!(l.variants && l.variants.length > 1)) return null;
+  const cur = (l.variant_index || 0) % l.variants.length;
+  const pick = async (k) => {
+    l.variant_index = k;
+    delete l.draft_text;
+    renderDm('linkedin');
+    try { await dmSave(l, { variant_index: k, draft_text: null }); } catch { /* toasted */ }
+  };
+  return el('div', { class: 'var-chips' }, ...l.variants.map((v, k) => el('button', {
+    class: 'chip' + (k === cur ? ' on' : ''), text: v.label || 'Version ' + (k + 1),
+    onclick: () => {
+      if (k === cur) return;
+      if (typeof l.draft_text === 'string') sheet('Switch and lose your edits to this one?', [{ label: 'Switch', run: () => pick(k) }]);
+      else pick(k);
+    } })));
+}
+
+function messageFocus(list, nodes) {
+  const i = pickFocus('message', list);
+  if (i < 0) {
+    nodes.push(el('div', { class: 'empty', text: 'No written messages waiting. People land here when they accept your request.' }));
+    setDmActions(null);
+    return;
+  }
+  const l = list[i];
+  const opened = dm.opened.has(l.id);
+  const card = el('div', { class: 'card focus-card' + (opened ? ' opened' : '') });
+  card.append(focusHeader(i, list.length, l),
+    el('div', { class: 'focus-name', text: l.name || 'LinkedIn lead' }),
+    l.product ? el('div', { class: 'focus-product', text: l.product }) : null);
+  if (opened) card.append(el('div', { class: 'focus-hint', text: 'Sent it? Tap Sent. Changed it in LinkedIn? Paste what you sent over the text first.' }));
+  card.append(dmFlags(l, ''));
+  const chips = variantChips(l);
+  if (chips) card.append(chips);
+  const { ta, count } = messageBox(l);
+  card.append(ta, el('div', { class: 'focus-meta' }, el('span', { class: 'muted small', text: 'Tap the text to edit' }), el('span', { class: 'spacer' }), count));
+  card.append(focusNav('message', list, i));
+  nodes.push(card);
+  const nx = upNext('message', list, i);
+  if (nx) nodes.push(nx);
+  setDmActions(opened ? [
+    el('button', { class: 'btn ok-solid grow', text: '✓ Sent', onclick: () => dmMarkSent(l, ta) }),
+    el('button', { class: 'btn', text: 'Skip', onclick: () => dmStatus(l, 'skipped', { reason: 'skipped on phone' }, 'Skipped ' + dmWho(l), 'ready') }),
+    el('button', { class: 'btn icon', text: '↗', title: 'Copy and open again', onclick: () => dmCopyOpen(l, ta) }),
+  ] : [
+    el('button', { class: 'btn primary grow', text: 'Copy + open LinkedIn ↗', onclick: () => dmCopyOpen(l, ta) }),
+    el('button', { class: 'btn', text: 'Skip', onclick: () => dmStatus(l, 'skipped', { reason: 'skipped on phone' }, 'Skipped ' + dmWho(l), 'ready') }),
+    el('button', { class: 'btn icon', text: '⋯', onclick: () => dmMenu(l) }),
+  ]);
+}
+
+function messageList(list, nodes) {
+  setDmActions(null);
+  nodes.push(...searchable('Search a name or product', () => groupedByTier(list.filter(matches), (l) =>
+    compactRow(l, () => focusOn('message', l.id), el('button', { class: 'btn sm', text: 'Open', onclick: () => focusOn('message', l.id) })))));
+}
+
+function needsBanner(needs) {
+  const writing = needs.filter((l) => l.writing_job).length;
+  const box = el('div', { class: 'needs-banner' });
+  box.append(el('div', { class: 'nb-text' },
+    el('b', { text: needs.length + (needs.length === 1 ? ' person needs' : ' people need') + ' a message' }),
+    el('div', { class: 'muted small', text: writing ? 'Claude is writing ' + writing + '. They show up here in a few minutes.' : 'New connections and fits with nothing written yet.' })));
+  box.append(el('div', { class: 'nb-actions' },
+    el('button', { class: 'btn sm primary', text: writing ? 'Writing…' : '✍ Write with Claude', disabled: !!writing, onclick: async (e) => {
+      const done = busy2(e.target);
+      try { const r = await api('/api/dm/write', { channel: 'linkedin' }); toast('Claude is writing ' + r.leads + '. Takes a few minutes.'); await refresh(); }
+      catch (err) { toast(err.message, true); }
+      done();
+    } }),
+    el('button', { class: 'link', text: li.showNeeds ? 'Hide' : 'Show', onclick: () => { li.showNeeds = !li.showNeeds; renderDm('linkedin'); } })));
+  if (li.showNeeds) {
+    box.append(el('div', { class: 'nb-list' }, ...needs.map((l) => el('div', { class: 'needs-row' },
+      el('b', { text: dmWho(l) }),
+      el('span', { class: 'muted', text: ' ' + [l.product, l.accepted_ts ? 'accepted ' + agoText(l.accepted_ts) : ''].filter(Boolean).join(' · ') }),
+      el('button', { class: 'more-btn', text: '⋯', onclick: () => dmMenu(l) })))));
+  }
+  return box;
+}
+
+function renderLinkedIn(root) {
+  const ch = 'linkedin';
+  const mode = modeOf(ch);
+  const all = dm.leads.filter((l) => l.channel === ch);
+  const nodes = [];
+  const nConnect = all.filter((l) => kindOf(l) === 'connect' && l.status === 'ready').length;
+  const nMessage = all.filter((l) => kindOf(l) === 'message' && l.status === 'ready' && !l.needs_message).length;
+  nodes.push(el('div', { class: 'modes' },
+    ...[['connect', 'Connect', nConnect], ['message', 'Message', nMessage]].map(([m, label, n]) =>
+      el('button', { class: 'mode' + (mode === m ? ' on' : ''), onclick: () => {
+        dm.mode.linkedin = m; LS.set('dmmode_linkedin', m); li.q = ''; renderDm(ch); dmTicker(); window.scrollTo(0, 0);
+      } }, label, n ? el('b', { text: ' ' + n }) : null))));
+  nodes.push(...liStatus(mode));
+
+  const mine = all.filter((l) => kindOf(l) === mode);
+  const camps = [...new Set(mine.filter((l) => ['ready', 'sent', 'requested'].includes(l.status)).map((l) => l.campaign))].filter(Boolean);
+  if (dm.camp[ch] && !camps.includes(dm.camp[ch])) dm.camp[ch] = '';
+  const inCamp = (l) => !dm.camp[ch] || l.campaign === dm.camp[ch];
+
+  if (mode === 'connect') {
+    const todo = mine.filter((l) => l.status === 'ready' && inCamp(l)).sort(byTier);
+    const asked = mine.filter((l) => l.status === 'requested' && inCamp(l))
+      .sort((a, b) => (b.requested_ts || '').localeCompare(a.requested_ts || ''));
+    const cdone = mine.filter((l) => ['skipped', 'cant_dm'].includes(l.status) && inCamp(l));
+    nodes.push(segBar(CONNECT_SEGS, dm.cseg, { connect: todo.length, requested: asked.length },
+      (k) => { dm.cseg = k; LS.set('dmcseg', k); li.q = ''; renderDm(ch); }));
+    if (dm.cseg === 'requested') {
+      requestedList(asked, nodes);
+    } else if (dm.cseg === 'cdone') {
+      setDmActions(null);
+      nodes.push(...(cdone.length ? cdone.map(connectDoneRow) : [el('div', { class: 'empty', text: 'Skips and dead links land here.' })]));
+    } else {
+      nodes.push(el('div', { class: 'view-row' }, viewToggle('connect', todo.length), el('span', { class: 'spacer' }), campFilterChip(camps)));
+      if (li.view.connect === 'list') connectList(todo, nodes); else connectFocus(todo, nodes);
+    }
+    root.replaceChildren(...nodes);
+    return;
+  }
+
+  const saved = state.outreach.filter((o) => o.platform === 'linkedin' && o.status === 'queued');
+  const ready = mine.filter((l) => l.status === 'ready' && inCamp(l)).sort(byTier);
+  const needs = ready.filter((l) => l.needs_message);
+  const writable = ready.filter((l) => !l.needs_message);
+  const sent = mine.filter((l) => l.status === 'sent' && inCamp(l)).sort((a, b) => (b.sent_ts || '').localeCompare(a.sent_ts || ''));
+  const done = mine.filter((l) => ['replied', 'skipped', 'cant_dm'].includes(l.status) && inCamp(l))
+    .sort((a, b) => ((b.status === 'replied') - (a.status === 'replied')) || (b.updated_ts || '').localeCompare(a.updated_ts || ''));
+  const replied = done.filter((l) => l.status === 'replied').length;
+  nodes.push(segBar(DM_SEGS, dm.seg[ch], { send: writable.length, sent: sent.length, done: replied, saved: saved.length },
+    (k) => { dm.seg[ch] = k; LS.set('dmseg_' + ch, k); li.q = ''; renderDm(ch); }));
+  const which = dm.seg[ch];
+  if (which === 'send') {
+    if (needs.length) nodes.push(needsBanner(needs));
+    nodes.push(el('div', { class: 'view-row' }, viewToggle('message', writable.length), el('span', { class: 'spacer' }), campFilterChip(camps)));
+    if (li.view.message === 'list') messageList(writable, nodes); else messageFocus(writable, nodes);
+  } else {
+    setDmActions(null);
+    if (which === 'sent') {
+      nodes.push(el('p', { class: 'hint', text: 'Waiting on a reply. Tap "They replied" when one comes in, and paste it so Claude can draft your answer.' }));
+      nodes.push(...(sent.length ? sent.map(dmSentCard) : [el('div', { class: 'empty', text: 'Nothing sent in the last 30 days.' })]));
+    } else if (which === 'done') {
+      nodes.push(...(done.length ? done.map(dmDoneRow) : [el('div', { class: 'empty', text: 'Replies, skips and closed chats land here.' })]));
+    } else {
+      nodes.push(el('p', { class: 'hint', text: 'Profiles you share from the LinkedIn app land here. Claude turns them into the next batch.' }));
+      nodes.push(...(saved.length ? saved.map(savedRow) : [el('div', { class: 'empty', text: 'No profiles saved.' })]));
+    }
+  }
+  root.replaceChildren(...nodes);
+}
+
 /* -- panel -- */
 function renderDm(ch, keepLinesOpenFor) {
   const root = $('dm-' + ch);
   if (!root) return;
   dm.pending[ch] = false;
+  if (ch === 'linkedin' && !dm.missing && !dm.error) { renderLinkedIn(root); return; }
+  if (ch === 'linkedin') setDmActions(null);
   const saved = state.outreach.filter((o) => (o.platform || 'x') === ch && o.status === 'queued');
   const nodes = [];
   if (dm.missing || dm.error) {
