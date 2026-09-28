@@ -183,6 +183,9 @@ the extension and the phone share one queue. None are in git.
 | `dm-libraries.json` | Line libraries the X DM messages are built from | - |
 | `dm-sends.json` | Every first message actually sent, and whether it got a reply | 20000 |
 | `dm-state.json` | Send cooldowns after a "Failed, try again" | - |
+| `dm-campaigns.json` | Campaign rules for Find more and Write with Claude (private) | - |
+| `dm-touched.json` | LinkedIn slugs, X handles and names already contacted | - |
+| `find-runs.json` | Find more runs: candidates, kept, dropped | 40 runs |
 
 Sizing was checked at 100 replies/day: every file stays under 10MB and every hot
 path runs in tens of milliseconds. Storage is not a constraint; batch size and
@@ -306,3 +309,40 @@ leaves. Taps inside the panel always redraw.
 **Deploy note.** The app half ships through GitHub Pages (push to main); the
 server half needs a restart on the Mac. An app that reaches an older server shows
 "restart the server" in both DM tabs instead of breaking.
+
+### LinkedIn connect list, Find more, Write with Claude (2026-09-28)
+
+**Two kinds of lead.** `kind: "message"` (default) and `kind: "connect"`
+(LinkedIn only: a profile to send a connection request to). Connect leads move
+`ready -> requested -> accepted`, and accepting turns the same record into a
+message lead (`needs_message: true` when it has no text yet). One record per
+person, so history (requested_ts, accepted_ts) is never split. Undoing an accept
+sends `{kind: "connect", status: "requested"}`.
+
+**Find more is the scout pattern again.** Stage 1 is mechanical and runs on the
+Mac (`server/lead_finder.py`, stdlib): Peerlist Launchpad API (about 60% of makers
+list their LinkedIn), Uneed's official API, Fazier's leaderboard. Only a link the
+maker listed on their own profile is used; nothing is searched for or guessed,
+the same rule as the old PH connect runs. Then the homepage check (the gates from
+the motion ICP handoff), dedupe against `dm-touched.json` plus every lead on
+file, and the v1.1 recency/price score. Stage 2 is the routine (`kind:
+leadfind`), which only judges fit against the campaign rules. A failed Stage 2
+adds the best by score, flagged "not checked by Claude", so a run is never
+wasted. Product Hunt is deliberately absent: logged-out requests don't see
+makers' LinkedIn links and scripted ones hit a bot check.
+
+**Write with Claude** (`kind: dmwrite`) drafts for `needs_message` leads in
+chunks of 15. The campaign rules ride in the payload from `dm-campaigns.json` in
+the data dir, so business rules (offers, prices, proof lines) stay out of this
+public repo. `sent_examples` (his real first messages, replied ones first) are
+the voice ground truth, like `voice_examples` for replies.
+
+**Number boxes.** Scout takes `want` (1-60): the candidate pool scales to
+`max(60, 3 x want)` and the routine shortlists up to `want`. Each DM tab has a
+"This session" box stored per device; the count is sends (or requests) since it
+was set.
+
+**Measured, not assumed (2026-09-28 sandbox run):** Peerlist listed 494 launches
+for 10 days; 40 of 72 checked makers had a LinkedIn link; 13 passed the homepage
+gates in 90 s. The account was signed out by LinkedIn after about 82 connection
+requests in one day, which is why the connect cap defaults to 25.

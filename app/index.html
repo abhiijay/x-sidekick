@@ -62,6 +62,8 @@
     <section data-panel="scout" hidden>
       <div class="scout-head">
         <button class="btn primary" id="scoutBtn">Run scout</button>
+        <label class="want" title="How many posts to find this run">Posts
+          <input id="scoutWant" type="number" inputmode="numeric" min="1" max="60"></label>
         <div id="scoutStatus" class="small muted"></div>
       </div>
       <div class="toolbar" id="scoutToolbar" hidden>
@@ -100,10 +102,12 @@
         <div class="pace-grid">
           <label>X DMs a day<input id="capX" type="number" inputmode="numeric" min="1" max="200"></label>
           <label>LinkedIn a day<input id="capLi" type="number" inputmode="numeric" min="1" max="200"></label>
+          <label>Connect requests a day<input id="capConnect" type="number" inputmode="numeric" min="1" max="200"></label>
+          <span></span>
           <label>Gap from (min)<input id="gapMin" type="number" inputmode="numeric" min="0" max="120"></label>
           <label>Gap to (min)<input id="gapMax" type="number" inputmode="numeric" min="0" max="240"></label>
         </div>
-        <div class="small muted">Warnings, not blocks. After each send the app picks a random gap in this range before the next one is due. Unwarmed X accounts: stay under about 20 cold DMs a day.</div>
+        <div class="small muted">Warnings, not blocks. After each message the app picks a random gap in this range before the next one is due. Unwarmed X accounts: stay under about 20 cold DMs a day. LinkedIn signed you out after about 82 connection requests in one day on Sep 28. The "This session" box on each tab is for how many you want to do right now.</div>
       </div>
       <h3>Teach your voice</h3>
       <div class="card form">

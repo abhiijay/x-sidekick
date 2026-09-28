@@ -118,9 +118,41 @@ Same premise as replies: Claude prepares, you send.
 - **Results back to Cowork.** `dm_tool.py export --since YYYY-MM-DD` prints what was sent, replied and
   skipped, for the outreach logs. `dm_tool.py status` shows counts per batch.
 
+### LinkedIn: Connect and Message
+
+The LinkedIn tab has two lists at the top:
+
+- **Connect**: profiles to send a connection request to, best tier first. Tap *Open LinkedIn*, send a
+  plain request, come back, tap *Requested*. In *Requested*, tap *Accepted* when they accept: the person
+  moves to **Message**. A daily cap on requests (Settings, default 25) warns before you go over.
+- **Message**: 1st-degree connections to message. People with no message yet sit in a "need a message"
+  card; **Write with Claude** fires the routine (`kind: dmwrite`), which writes 1-3 versions per person
+  from the campaign's rules and they show up as normal cards.
+
+### Find more
+
+A card at the top of *To connect* (and of X DM *To send*): pick the campaign, type how many, tap Find.
+The Mac pulls fresh launches from Peerlist, Uneed and Fazier (`server/lead_finder.py`), keeps makers who
+listed their own LinkedIn (or X) link, checks each product homepage (loads, pricing, and for motion video no
+video embed), skips anyone already contacted (`dm-touched.json` plus every lead on file), scores them, then
+the routine (`kind: leadfind`) judges fit with the campaign's rules. New people land in *To connect*. If
+Claude can't check them, the card offers to add the top ones unchecked. Product Hunt is not a source here:
+it hides makers' LinkedIn links from logged-out requests.
+
+Campaign rules live in `dm-campaigns.json` in the data dir (never in this repo), loaded with
+`dm_tool.py campaign campaign.json`. They hold the ICP, what to drop, and exactly how to write.
+
+### Number boxes
+
+- **Scout** has a *Posts* box: how many posts to shortlist this run (1-60, default 20). The candidate pool
+  grows with it.
+- Each outreach tab has a **This session** box: how many you plan to send (or request) right now. The pace
+  strip counts them and warns when the session is done.
+
 Data files (all in the data dir, none in git): `dm-leads.json` (the leads and their state),
 `dm-libraries.json` (line libraries), `dm-sends.json` (every first message actually sent, plus whether it
-got a reply: the learning record), `dm-state.json` (cooldowns).
+got a reply: the learning record), `dm-state.json` (cooldowns), `dm-campaigns.json` (campaign rules),
+`dm-touched.json` (everyone already contacted), `find-runs.json` (Find more runs).
 
 ## Limits
 

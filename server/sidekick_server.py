@@ -560,8 +560,20 @@ DM_LEADS_FILE = os.path.join(DATA_DIR, "dm-leads.json")
 DM_LIBS_FILE = os.path.join(DATA_DIR, "dm-libraries.json")
 DM_SENDS_FILE = os.path.join(DATA_DIR, "dm-sends.json")
 DM_STATE_FILE = os.path.join(DATA_DIR, "dm-state.json")
+# Per-campaign rules (ICP, offer, how to write) sent to the routine in job
+# payloads. Private: it lives in the data dir, never in this public repo.
+DM_CAMPAIGNS_FILE = os.path.join(DATA_DIR, "dm-campaigns.json")
+# Everyone already contacted anywhere (LinkedIn slugs, X handles, names), so
+# "Find more" never brings back someone who was already connected or messaged.
+DM_TOUCHED_FILE = os.path.join(DATA_DIR, "dm-touched.json")
+FIND_RUNS_FILE = os.path.join(DATA_DIR, "find-runs.json")
 DM_CHANNELS = ("linkedin", "x")
-DM_STATUSES = ("ready", "sent", "replied", "skipped", "cant_dm")
+# A lead is kind "message" (default) or kind "connect" (LinkedIn only: a profile
+# to send a connection request to). Connect leads move ready -> requested ->
+# accepted, and accepting turns them into a message lead.
+DM_STATUSES = ("ready", "sent", "replied", "skipped", "cant_dm", "requested", "accepted")
+FIND_MAX_WANT = 100
+WRITE_CHUNK = 15            # leads per "write messages" routine run
 DM_LEADS_MAX = 5000
 DM_SENDS_KEEP = 20000
 DM_RECENT_DAYS = 30          # sent / finished leads the app still lists
@@ -594,41 +606,92 @@ def save_dm_state(st):
     _save(DM_STATE_FILE, st, "state")
 
 
+def lead_kind(lead):
+    return lead.get("kind") or "message"
+
+
 def dm_stats(leads, state):
     today = time.strftime("%Y-%m-%d")
+    week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
     now = time.time()
     out = {}
     for ch in DM_CHANNELS:
         mine = [l for l in leads if l.get("channel") == ch]
         sent = sorted((l["sent_ts"] for l in mine if l.get("sent_ts")), reverse=True)
+        asked = sorted((l["requested_ts"] for l in mine if l.get("requested_ts")), reverse=True)
         cool = ((state.get("cooldowns") or {}).get(ch) or {})
         until = cool.get("until") or 0
         out[ch] = {
-            "ready": sum(1 for l in mine if l.get("status") == "ready"),
+            "ready": sum(1 for l in mine if l.get("status") == "ready" and lead_kind(l) == "message"),
             "sent_today": sum(1 for t in sent if t.startswith(today)),
             "last_sent_ts": sent[0] if sent else None,
             "cooldown_until": until if until > now else None,
             "cooldown_since": cool.get("ts") if until > now else None,
+            "connect_ready": sum(1 for l in mine if l.get("status") == "ready" and lead_kind(l) == "connect"),
+            "requested_open": sum(1 for l in mine if l.get("status") == "requested"),
+            "requested_today": sum(1 for t in asked if t.startswith(today)),
+            "requested_7d": sum(1 for t in asked if t >= week_ago),
+            "last_requested_ts": asked[0] if asked else None,
+            "needs_message": sum(1 for l in mine if l.get("needs_message") and l.get("status") == "ready"),
         }
     return out
 
 
 def dm_view():
-    """What the app shows: everything to send, plus the last month of the rest.
+    """What the app shows: everything waiting on him, plus the recent rest.
 
+    Waiting = to connect, requested (until accepted, up to 90 days), to send.
     Only the libraries the listed leads use are sent along.
     """
     leads = load_dm_leads()
     cutoff = (datetime.now() - timedelta(days=DM_RECENT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    long_cut = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d %H:%M:%S")
     ready = [l for l in leads if l.get("status") == "ready"]
-    recent = [l for l in leads if l.get("status") != "ready"
+    asked = [l for l in leads if l.get("status") == "requested"
+             and (l.get("requested_ts") or l.get("updated_ts") or "") >= long_cut]
+    recent = [l for l in leads if l.get("status") not in ("ready", "requested")
               and (l.get("updated_ts") or l.get("added_ts") or "") >= cutoff]
     recent.sort(key=lambda l: l.get("updated_ts") or "", reverse=True)
-    shown = ready + recent[:DM_DONE_MAX]
+    shown = ready + asked + recent[:DM_DONE_MAX]
+    # A write job that died without calling back must not leave "writing…" up.
+    live = {j["id"] for j in load_jobs() if j["kind"] == "dmwrite"
+            and j["status"] in ("created", "fired", "working") and j.get("expires", 0) > time.time()}
+    # `context` is for the writer only; leaving it out keeps the phone's payload small.
+    shown = [{k: v for k, v in l.items()
+              if k != "context" and not (k == "writing_job" and v not in live)} for l in shown]
     wanted = {l.get("library") for l in shown if l.get("library")}
     libs = {k: v for k, v in load_dm_libraries().items() if k in wanted}
+    camps = {k: {"label": v.get("label") or k, "channels": v.get("channels") or list(DM_CHANNELS)}
+             for k, v in load_dm_campaigns().items()}
     return {"leads": shown, "libraries": libs, "stats": dm_stats(leads, load_dm_state()),
-            "cooldown_min": DM_COOLDOWN_MIN}
+            "cooldown_min": DM_COOLDOWN_MIN, "campaigns": camps}
+
+
+def load_dm_campaigns():
+    c = _load(DM_CAMPAIGNS_FILE, "campaigns")
+    return c if isinstance(c, dict) else {}
+
+
+def touched_keys():
+    """Everyone already contacted: 'li:<slug>' and 'x:<handle>' keys, plus names."""
+    keys, names = set(), set()
+    t = _load(DM_TOUCHED_FILE, "touched")
+    if isinstance(t, dict):
+        keys.update("li:" + s.lower().rstrip("/").rstrip("-") for s in t.get("linkedin") or [] if s)
+        keys.update("x:" + h.lower().lstrip("@") for h in t.get("x") or [] if h)
+        names.update(n.lower() for n in t.get("names") or [] if n and " " in n)
+    for l in load_dm_leads():
+        slug = linkedin_slug(l.get("profile_url") or "")
+        if slug:
+            keys.add("li:" + slug.lower().rstrip("/").rstrip("-"))
+        if l.get("handle") and l.get("channel") == "x":
+            keys.add("x:" + str(l["handle"]).lower().lstrip("@"))
+    for o in load_outreach():
+        if o.get("platform") == "linkedin" and o.get("handle"):
+            keys.add("li:" + str(o["handle"]).lower())
+        elif o.get("handle"):
+            keys.add("x:" + str(o["handle"]).lower())
+    return keys, names
 
 
 def record_dm_send(lead):
@@ -703,6 +766,11 @@ def dm_update(body):
         if isinstance(body.get("sent_lines"), str):
             lead["sent_lines"] = body["sent_lines"][:120]
 
+        if body.get("kind") in ("connect", "message"):
+            lead["kind"] = body["kind"]          # only used to undo an "accepted"
+        if new in ("requested", "accepted") and lead_kind(lead) != "connect":
+            return 400, {"error": "requested/accepted are for connect leads"}
+
         prev = lead.get("status")
         if new and new != prev:
             lead["status"] = new
@@ -713,9 +781,25 @@ def dm_update(body):
                 lead.pop("reply_ts", None)
             elif new == "replied":
                 lead["reply_ts"] = ts
+            elif new == "requested":
+                if not lead.get("requested_ts"):
+                    lead["requested_ts"] = ts
+                for k in ("accepted_ts", "needs_message", "skip_reason"):
+                    lead.pop(k, None)
+            elif new == "accepted":
+                # Now a 1st-degree connection: the same person becomes someone
+                # to message, carrying everything known about them.
+                lead["accepted_ts"] = ts
+                lead["kind"] = "message"
+                lead["status"] = "ready"
+                if not lead.get("variants") and not lead.get("library"):
+                    lead["needs_message"] = True
             elif new == "ready":
-                for k in ("sent_ts", "sent_early", "sent_verbatim", "sent_lines",
-                          "reply_ts", "skip_reason"):
+                if lead_kind(lead) == "connect":
+                    drop = ("requested_ts", "accepted_ts", "needs_message", "skip_reason")
+                else:
+                    drop = ("sent_ts", "sent_early", "sent_verbatim", "sent_lines", "reply_ts", "skip_reason")
+                for k in drop:
                     lead.pop(k, None)
             elif new in ("skipped", "cant_dm"):
                 lead["skip_reason"] = str(body.get("reason") or "")[:200]
@@ -749,6 +833,295 @@ def dm_failed(body):
         save_dm_state(st)
         stats = dm_stats(load_dm_leads(), st)
     return 200, {"ok": True, "stats": stats}
+
+
+def clamp_int(value, low, high, default):
+    try:
+        return max(low, min(high, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def short_campaign(cid):
+    return {"motion-video": "mv", "beamcite": "bc"}.get(cid, re.sub(r"[^a-z0-9]", "", cid.lower())[:4] or "c")
+
+
+# ---------------------------------------------------------------- Find more (lead finder job)
+#
+# Same two stages as the reply scout. Stage 1 runs here, in a thread: pull fresh
+# launches (lead_finder.py), keep makers who listed a LinkedIn (or X) link, check
+# their homepage, skip anyone already touched, score. Stage 2 fires the routine
+# (kind "leadfind") so Claude judges ICP fit with the campaign's rules and drops
+# directories, agencies and competitors. Only then are leads added. Nothing is
+# ever sent: a connect lead is just a profile link for him to open.
+
+def load_find_runs():
+    return _load(FIND_RUNS_FILE, "runs")
+
+
+def save_find_runs(runs):
+    _save(FIND_RUNS_FILE, runs[:40], "runs")
+
+
+def update_find_run(job_id, **fields):
+    with LOCK:
+        runs = load_find_runs()
+        for r in runs:
+            if r.get("job_id") == job_id:
+                r.update(fields)
+        save_find_runs(runs)
+
+
+def start_find_job(body):
+    campaigns = load_dm_campaigns()
+    campaign = str(body.get("campaign") or "")
+    if campaign not in campaigns:
+        return 400, {"error": "unknown campaign; load one with dm_tool.py campaign"}
+    channel = body.get("channel") if body.get("channel") in DM_CHANNELS else "linkedin"
+    want = clamp_int(body.get("want"), 1, FIND_MAX_WANT, 20)
+    days = clamp_int(body.get("days"), 3, 45, 14)
+    running = next((j for j in load_jobs() if j["kind"] == "leadfind"
+                    and j["status"] in ("created", "fetching", "scoring", "fired", "working")
+                    and j.get("expires", 0) > time.time()), None)
+    if running:
+        return 409, {"error": "a Find more run is already going", "job": public_job(running)}
+    job, token = create_job("leadfind", {"campaign": campaign, "channel": channel,
+                                         "want": want, "days": days})
+    with LOCK:
+        runs = load_find_runs()
+        runs.insert(0, {"id": "find_" + uuid.uuid4().hex[:8], "job_id": job["id"], "ts": now_str(),
+                        "campaign": campaign, "channel": channel, "want": want, "days": days,
+                        "candidates": [], "added": [], "report": None})
+        save_find_runs(runs)
+    threading.Thread(target=run_find_stage1, args=(job["id"], token), daemon=True).start()
+    return 200, {"ok": True, "job": public_job(get_job(job["id"]))}
+
+
+def run_find_stage1(job_id, token):
+    try:
+        import lead_finder
+        job = get_job(job_id)
+        p = job["payload"]
+        camp = load_dm_campaigns().get(p["campaign"], {})
+        find_cfg = camp.get("find") or {}
+        keys, names = touched_keys()
+        update_job(job_id, status="fetching", progress="starting")
+        cands, report = lead_finder.find(
+            need="linkedin" if p["channel"] == "linkedin" else "x", want=p["want"], days=p["days"],
+            touched=keys, touched_names=names,
+            exclude_keywords=find_cfg.get("exclude_keywords") or (),
+            require_no_video=bool(find_cfg.get("require_no_video", True)),
+            require_pricing=bool(find_cfg.get("require_pricing", True)),
+            time_budget=int(find_cfg.get("time_budget_s") or 420),
+            progress=lambda msg: update_job(job_id, progress=msg[:120]))
+        update_find_run(job_id, candidates=cands, stage1=report)
+        if not cands:
+            update_job(job_id, status="done", report="Nothing new passed the checks. " + find_summary(report))
+            return
+        if routine_configured():
+            update_job(job_id, status="scoring", progress="%d candidates, Claude is checking fit" % len(cands))
+            fire_routine(get_job(job_id), token)
+        else:
+            added = add_found_leads(job_id, [{"key": c["key"]} for c in cands[:p["want"]]],
+                                    note="Not checked by Claude (routine is off)")
+            update_job(job_id, status="done", report="Added %d without Claude's check. %s"
+                       % (added, find_summary(report)))
+    except Exception as e:  # never kill the server from a background run
+        log("find failed: %r" % e)
+        update_job(job_id, status="failed", error=str(e)[:300])
+
+
+def find_summary(report):
+    bits = []
+    for name, st in (report.get("sources") or {}).items():
+        if st.get("listed"):
+            bits.append("%s: %d launches, %d with a link, %d passed" % (
+                name, st["listed"], st.get("with_contact", 0), st.get("passed", 0)))
+    if report.get("errors"):
+        bits.append("errors: " + "; ".join(report["errors"]))
+    if report.get("stopped"):
+        bits.append(report["stopped"])
+    return " | ".join(bits)
+
+
+def add_found_leads(job_id, keep, note=""):
+    """Turn judged candidates into leads. `keep` = [{key, icp, note, tier}]."""
+    run = next((r for r in load_find_runs() if r.get("job_id") == job_id), None)
+    if not run:
+        return 0
+    by_key = {c["key"]: c for c in run.get("candidates") or []}
+    stamp, added = now_str(), []
+    mmdd = time.strftime("%m%d")
+    with LOCK:
+        leads = load_dm_leads()
+        have = {l.get("id") for l in leads}
+        taken, _ = touched_keys()
+        order = max([l.get("order") or 0 for l in leads] + [0])
+        for k in keep:
+            c = by_key.get(k.get("key"))
+            if not c or c["key"] in taken:
+                continue
+            base = (c["key"].split(":", 1)[1] if ":" in c["key"] else c["key"]).lower()
+            lid = ("li" if run["channel"] == "linkedin" else "x") + "-%s-f%s-%s" % (
+                short_campaign(run["campaign"]), mmdd, re.sub(r"[^a-z0-9_.-]", "", base)[:50])
+            if lid in have:
+                continue
+            order += 1
+            tier = k.get("tier") or c.get("tier")
+            flag = "; ".join(x for x in (k.get("note"), note) if x)
+            lead = {"id": lid, "channel": run["channel"], "campaign": run["campaign"],
+                    "batch": "Found %s" % time.strftime("%b %d").replace(" 0", " "),
+                    "name": c.get("maker") or "", "product": c.get("product") or "",
+                    "meta": " · ".join(x for x in (tier, "score %s" % c.get("score"), c.get("source")) if x),
+                    "flag": flag[:400], "headline": c.get("headline") or "", "site": c.get("site"),
+                    "tagline": c.get("tagline") or "", "tier": tier, "score": c.get("score"),
+                    "icp": k.get("icp") or "", "source": c.get("source"), "launch": c.get("launch"),
+                    "fields": {"n": c.get("first") or "", "p": c.get("product") or ""},
+                    "status": "ready", "order": order, "added_ts": stamp, "updated_ts": stamp,
+                    "found_by": job_id}
+            if run["channel"] == "linkedin":
+                lead.update(kind="connect", profile_url=c.get("linkedin"))
+            else:
+                h = lead_x_handle(c.get("x"))
+                lead.update(kind="message", handle=h, profile_url="https://x.com/" + (h or ""),
+                            needs_message=True)
+            leads.append(lead)
+            have.add(lid)
+            taken.add(c["key"])
+            added.append(lid)
+        save_dm_leads(leads)
+    update_find_run(job_id, added=added)
+    return len(added)
+
+
+def lead_x_handle(url):
+    m = re.search(r"(?:x|twitter)\.com/@?([A-Za-z0-9_]{1,15})", url or "", re.I)
+    return m.group(1) if m else None
+
+
+def agent_write_leads(job, body):
+    keep = body.get("keep")
+    if not isinstance(keep, list):
+        return 400, {"error": "keep list required"}
+    keep = [k for k in keep if isinstance(k, dict) and k.get("key")][:job["payload"].get("want", 20)]
+    n = add_found_leads(job["id"], keep)
+    drops = [d for d in (body.get("drop") or []) if isinstance(d, dict)][:200]
+    update_find_run(job["id"], dropped=drops, report=str(body.get("report") or "")[:2000])
+    return 200, {"ok": True, "added": n}
+
+
+def find_add_unchecked(body):
+    """The routine never answered: add the best candidates by score, flagged."""
+    run = next((r for r in load_find_runs() if r.get("job_id") == body.get("job_id")), None)
+    if not run:
+        return 404, {"error": "run not found"}
+    job = get_job(run["job_id"]) or {}
+    if job.get("status") in ("created", "fetching", "scoring", "fired", "working") and job.get("expires", 0) > time.time():
+        return 409, {"error": "Claude is still checking these"}
+    n = add_found_leads(run["job_id"], [{"key": c["key"]} for c in (run.get("candidates") or [])[:run.get("want", 20)]],
+                        note="Not checked by Claude")
+    return 200, {"ok": True, "added": n}
+
+
+def find_status():
+    runs = load_find_runs()
+    run = dict(runs[0]) if runs else None
+    job = get_job(run["job_id"]) if run else None
+    if run:
+        run["candidate_count"] = len(run.get("candidates") or [])
+        run["added_count"] = len(run.get("added") or [])
+        run.pop("candidates", None)
+    return {"run": run, "job": public_job(job) if job else None}
+
+
+# ---------------------------------------------------------------- Write with Claude (dmwrite job)
+#
+# Leads with no message yet (a connection that just accepted, a found X lead)
+# are drafted by the routine: one to three versions per person, written to the
+# campaign's rules, which ride along in the payload from dm-campaigns.json.
+
+def start_write_job(body):
+    ids = set(body.get("ids") or []) if isinstance(body.get("ids"), list) else None
+    live = {j["id"] for j in load_jobs() if j["kind"] == "dmwrite"
+            and j["status"] in ("created", "fired", "working") and j.get("expires", 0) > time.time()}
+    with LOCK:
+        leads = load_dm_leads()
+        todo = [l for l in leads if l.get("status") == "ready" and lead_kind(l) == "message"
+                and l.get("needs_message") and l.get("writing_job") not in live
+                and (not ids or l.get("id") in ids)
+                and (not body.get("channel") or l.get("channel") == body.get("channel"))]
+        if not todo:
+            return 400, {"error": "no one is waiting for a message"}
+        fired = []
+        for start in range(0, len(todo), WRITE_CHUNK):
+            chunk = todo[start:start + WRITE_CHUNK]
+            job, token = create_job("dmwrite", {"lead_ids": [l["id"] for l in chunk],
+                                                "note": str(body.get("note") or "")[:500]})
+            for l in chunk:
+                l["writing_job"] = job["id"]
+            fired.append((job, token))
+        save_dm_leads(leads)
+    for job, token in fired:
+        if not fire_routine(job, token):
+            with LOCK:  # the run never started: don't leave leads showing "writing"
+                leads = load_dm_leads()
+                for l in leads:
+                    if l.get("writing_job") == job["id"]:
+                        l.pop("writing_job", None)
+                save_dm_leads(leads)
+    jobs = [public_job(get_job(j["id"])) for j, _ in fired]
+    if all(j["status"] == "failed" for j in jobs):
+        return 502, {"error": jobs[0].get("error") or "Claude could not be started", "jobs": jobs}
+    return 200, {"ok": True, "job": jobs[0], "jobs": jobs, "leads": len(todo)}
+
+
+def dm_payload_for_write(job):
+    ids = set(job["payload"].get("lead_ids") or [])
+    keep = ("id", "channel", "campaign", "name", "handle", "profile_url", "product", "tagline", "site",
+            "headline", "meta", "flag", "note", "icp", "tier", "fields", "reply_text", "context")
+    leads = [{k: l[k] for k in keep if l.get(k)} for l in load_dm_leads() if l.get("id") in ids]
+    camps = load_dm_campaigns()
+    used = {l.get("campaign") for l in leads}
+    sends = _load(DM_SENDS_FILE, "sends")
+    # His real first messages are the voice ground truth, the replied ones first.
+    examples = sorted(sends, key=lambda s: not s.get("replied"))[:12]
+    return {"job_id": job["id"], "kind": "dmwrite", "note": job["payload"].get("note"),
+            "leads": leads,
+            "campaigns": {c: camps[c] for c in used if c in camps},
+            "sent_examples": [{"channel": s.get("channel"), "campaign": s.get("campaign"),
+                               "text": s.get("text"), "replied": bool(s.get("replied")),
+                               "edited_by_him": s.get("verbatim") is False} for s in examples],
+            "write_to": "/agent/job/%s/dmwrite" % job["id"]}
+
+
+def agent_write_dm(job, body):
+    items = body.get("items")
+    if not isinstance(items, list):
+        return 400, {"error": "items list required"}
+    allowed = set(job["payload"].get("lead_ids") or [])
+    written = 0
+    with LOCK:
+        leads = load_dm_leads()
+        by_id = {l["id"]: l for l in leads}
+        for it in items:
+            lead = by_id.get(it.get("id")) if isinstance(it, dict) else None
+            if not lead or lead["id"] not in allowed:
+                continue
+            variants = [{"label": str(v.get("label") or "Message")[:40], "text": str(v.get("text"))[:DM_TEXT_MAX]}
+                        for v in (it.get("variants") or []) if isinstance(v, dict) and str(v.get("text") or "").strip()]
+            if it.get("flag"):
+                lead["flag"] = "; ".join(x for x in (lead.get("flag"), str(it["flag"])[:300]) if x)
+            if variants and lead.get("status") == "ready":
+                lead["variants"] = variants[:3]
+                lead["variant_index"] = 0
+                lead.pop("needs_message", None)
+                lead.pop("draft_text", None)
+                lead["written_ts"] = now_str()
+                written += 1
+            lead.pop("writing_job", None)
+            lead["updated_ts"] = now_str()
+        save_dm_leads(leads)
+    return 200, {"ok": True, "written": written}
 
 
 def dm_cooldown_clear(body):
@@ -1213,6 +1586,8 @@ def run_scout_stage1(job_id, token):
         handles, never = parse_watchlist()
         if not handles:
             raise ArmoryError("watchlist is empty or missing: %s" % WATCHLIST_FILE)
+        want = (get_job(job_id) or {}).get("payload", {}).get("want") or 20
+        max_cands = max(SCOUT_MAX_CANDIDATES, min(180, want * 3))
         credits = None
         try:
             credits = armory("/twitter/credits").get("credits_remaining")
@@ -1276,10 +1651,10 @@ def run_scout_stage1(job_id, token):
         # the rest by freshness and low crowding, so gap posts are well represented
         # without crowding out everything else.
         gap = sorted((c for c in pool.values() if c["high_view_low_eng"]),
-                     key=lambda c: -c["view_gap"])[:SCOUT_MAX_CANDIDATES // 2]
+                     key=lambda c: -c["view_gap"])[:max_cands // 2]
         gap_urls = {c["url"] for c in gap}
         rest = sorted((c for c in pool.values() if c["url"] not in gap_urls), key=scout_rank)
-        cands = (gap + rest)[:SCOUT_MAX_CANDIDATES]
+        cands = (gap + rest)[:max_cands]
         with LOCK:
             runs = load_scout_runs()
             for r in runs:
@@ -1299,7 +1674,7 @@ def run_scout_stage1(job_id, token):
         update_job(job_id, status="failed", error=str(e))
 
 
-def start_scout_job():
+def start_scout_job(want=20):
     if not armory_configured():
         return 400, {"error": "Armory is not configured on the server"}
     running = next((j for j in load_jobs() if j["kind"] == "scout"
@@ -1307,11 +1682,14 @@ def start_scout_job():
                     and j.get("expires", 0) > time.time()), None)
     if running:
         return 409, {"error": "a scout run is already in progress", "job": public_job(running)}
-    job, token = create_job("scout", {})
+    # How many posts he wants this session (the phone's number box). The
+    # candidate pool grows with it so the shortlist still has room to choose.
+    want = clamp_int(want, 1, 60, 20)
+    job, token = create_job("scout", {"want": want})
     with LOCK:
         runs = load_scout_runs()
         runs.insert(0, {"id": "run_" + uuid.uuid4().hex[:8], "job_id": job["id"], "ts": now_str(),
-                        "candidates": [], "shortlist": [], "report": None})
+                        "want": want, "candidates": [], "shortlist": [], "report": None})
         save_scout_runs(runs)
     threading.Thread(target=run_scout_stage1, args=(job["id"], token), daemon=True).start()
     return 200, {"ok": True, "job": public_job(get_job(job["id"]))}
@@ -1395,9 +1773,19 @@ def agent_job_payload(job):
                 "people": people_for(i.get("author") for i in items),
                 "blocked_authors": sorted(blocked_set()),
                 "write_to": "/agent/job/%s/drafts" % job["id"]}
+    if job["kind"] == "dmwrite":
+        return dm_payload_for_write(job)
+    if job["kind"] == "leadfind":
+        run = next((r for r in load_find_runs() if r["job_id"] == job["id"]), None) or {}
+        camp = load_dm_campaigns().get(job["payload"].get("campaign"), {})
+        return {"job_id": job["id"], "kind": "leadfind", "campaign": job["payload"].get("campaign"),
+                "channel": job["payload"].get("channel"), "want": job["payload"].get("want"),
+                "rules": camp, "candidates": run.get("candidates") or [],
+                "write_to": "/agent/job/%s/leads" % job["id"]}
     run = next((r for r in load_scout_runs() if r["job_id"] == job["id"]), None)
     return {"job_id": job["id"], "kind": "scout",
             "candidates": run["candidates"] if run else [],
+            "want": (run or {}).get("want") or 20,
             "window_hours": SCOUT_WINDOW_HOURS,
             "write_to": "/agent/job/%s/scout" % job["id"]}
 
@@ -1764,6 +2152,9 @@ class AppHandler(BaseHandler):
                 if path == "/api/dm":
                     with LOCK:
                         return self._json(200, dm_view())
+                if path == "/api/leads/find":
+                    with LOCK:
+                        return self._json(200, find_status())
                 if path == "/api/queue":
                     return self._json(200, {"items": load_queue()})
                 if path == "/api/outreach":
@@ -1825,7 +2216,13 @@ class AppHandler(BaseHandler):
                 ids = body.get("ids") if isinstance(body.get("ids"), list) else None
                 return self._json(*start_draft_job(ids, body.get("account"), str(body.get("note") or "")))
             if path == "/api/scout":
-                return self._json(*start_scout_job())
+                return self._json(*start_scout_job(body.get("want")))
+            if path == "/api/leads/find":
+                return self._json(*start_find_job(body))
+            if path == "/api/leads/find/add-unchecked":
+                return self._json(*find_add_unchecked(body))
+            if path == "/api/dm/write":
+                return self._json(*start_write_job(body))
             if path == "/api/block":
                 with LOCK:
                     return self._json(*block_handle(body))
@@ -1849,7 +2246,7 @@ class AppHandler(BaseHandler):
 
     # ---- Claude callbacks (per-job token)
     def _agent(self, method, path):
-        m = re.match(r"^/agent/job/(job_[a-f0-9]{10})(?:/(drafts|scout|done))?$", path)
+        m = re.match(r"^/agent/job/(job_[a-f0-9]{10})(?:/(drafts|scout|leads|dmwrite|done))?$", path)
         am = re.match(r"^/agent/armory/(job_[a-f0-9]{10})(/twitter/[a-z/]+)$", path)
         job_id = (m or am).group(1) if (m or am) else None
         job = get_job(job_id) if job_id else None
@@ -1878,6 +2275,10 @@ class AppHandler(BaseHandler):
                 return self._json(*agent_write_drafts(job, body))
             if action == "scout" and job["kind"] == "scout":
                 return self._json(*agent_write_scout(job, body))
+            if action == "leads" and job["kind"] == "leadfind":
+                return self._json(*agent_write_leads(job, body))
+            if action == "dmwrite" and job["kind"] == "dmwrite":
+                return self._json(*agent_write_dm(job, body))
             if action == "done":
                 if job["kind"] == "draft":
                     with LOCK:  # release anything Claude did not write back
@@ -1886,6 +2287,20 @@ class AppHandler(BaseHandler):
                             if i.get("drafting_job") == job["id"]:
                                 i.pop("drafting_job", None)
                         save_queue(items)
+                if job["kind"] == "dmwrite":
+                    with LOCK:
+                        leads = load_dm_leads()
+                        for l in leads:
+                            if l.get("writing_job") == job["id"]:
+                                l.pop("writing_job", None)
+                        save_dm_leads(leads)
+                if job["kind"] == "leadfind" and body.get("failed"):
+                    # Claude could not judge them: keep the best by score, flagged.
+                    run = next((r for r in load_find_runs() if r["job_id"] == job["id"]), {})
+                    if not run.get("added"):
+                        add_found_leads(job["id"], [{"key": c["key"]} for c in
+                                                    (run.get("candidates") or [])[:job["payload"].get("want", 20)]],
+                                        note="Not checked by Claude (the check failed)")
                 update_job(job["id"], status="failed" if body.get("failed") else "done",
                            report=str(body.get("report", ""))[:4000], finished=now_str())
                 return self._json(200, {"ok": True})

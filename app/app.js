@@ -192,6 +192,7 @@ async function refresh() {
     renderReplies();
     renderDmAll();
     renderSettingsLists();
+    if (dm.loaded) loadFind();
     schedulePoll();
   } catch (e) {
     $('dot').className = 'dot err';
@@ -657,9 +658,16 @@ document.querySelectorAll('.chip[data-filter]').forEach((b) => b.addEventListene
   renderScout();
 }));
 
+/* How many posts to find this run: he sometimes wants fewer than 20, sometimes more. */
+$('scoutWant').value = LS.get('scout_want', '20');
+$('scoutWant').addEventListener('change', () => {
+  const v = parseInt($('scoutWant').value, 10);
+  if (Number.isFinite(v) && v >= 1 && v <= 60) LS.set('scout_want', String(v)); else $('scoutWant').value = LS.get('scout_want', '20');
+});
 $('scoutBtn').addEventListener('click', async (e) => {
+  const want = parseInt($('scoutWant').value, 10) || 20;
   const done = busy(e.target, 'Starting…');
-  try { await api('/api/scout', {}); toast('Scout started'); } catch (err) { toast(err.message, true); }
+  try { await api('/api/scout', { want }); toast('Scout started · looking for ' + want); } catch (err) { toast(err.message, true); }
   done();
   loadScout();
 });
@@ -697,12 +705,19 @@ $('scoutPick').addEventListener('click', (e) => pickScout(false, e.target));
 const DM_CH = ['linkedin', 'x'];
 const DM_NAME = { linkedin: 'LinkedIn', x: 'X' };
 const DM_SEGS = [['send', 'To send'], ['sent', 'Sent'], ['done', 'Done'], ['saved', 'Saved']];
+const CONNECT_SEGS = [['connect', 'To connect'], ['requested', 'Requested'], ['cdone', 'Done']];
+const TIER_RANK = { 'Contact this week': 0, 'This week': 0, 'Next batch': 1, 'Later': 2, 'Later / check first': 2 };
 const dm = {
-  loaded: false, missing: false, error: '', leads: [], libs: {}, stats: {},
+  loaded: false, missing: false, error: '', leads: [], libs: {}, stats: {}, campaigns: {}, find: null,
+  // LinkedIn has two lists: people to connect with, and connections to message.
+  mode: { linkedin: LS.get('dmmode_linkedin', 'connect'), x: 'message' },
   seg: { linkedin: LS.get('dmseg_linkedin', 'send'), x: LS.get('dmseg_x', 'send') },
+  cseg: LS.get('dmcseg', 'connect'),
   camp: { linkedin: LS.get('dmcamp_linkedin', ''), x: LS.get('dmcamp_x', '') },
-  defaults: {}, pending: {}, timer: null,
+  defaults: {}, pending: {}, timer: null, findTimer: null, opened: new Set(),
 };
+function modeOf(ch) { return ch === 'linkedin' && dm.mode.linkedin === 'connect' ? 'connect' : 'message'; }
+function kindOf(l) { return l.kind || 'message'; }
 
 function takeDm(d) {
   if (d && d.__error) {
@@ -714,44 +729,79 @@ function takeDm(d) {
   dm.leads = d.leads || [];
   dm.libs = d.libraries || {};
   dm.stats = d.stats || {};
+  dm.campaigns = d.campaigns || {};
   buildDmDefaults();
 }
 
-/* -- pacing (warnings, never blocks) -- */
-function paceCfg(ch) {
+/* -- pacing (warnings, never blocks) --
+ * Messages: daily cap + a random gap between sends. Connection requests: daily
+ * cap only (LinkedIn signed the account out after about 82 in one day on
+ * 2026-09-28). Both: an optional session size he types in. */
+function paceCfg(ch, mode) {
   const n = (k, d) => { const v = parseInt(LS.get(k, ''), 10); return Number.isFinite(v) && v >= 0 ? v : d; };
+  if (mode === 'connect') return { cap: n('cap_connect', 25) || 25, min: 0, max: 0 };
   const min = n('gapmin', 1);
   return { cap: n('cap_' + ch, 20) || 20, min, max: Math.max(min, n('gapmax', 9)) };
 }
 function strHash(x) { let h = 2166136261; for (let i = 0; i < x.length; i++) { h ^= x.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 function tsMs(ts) { return new Date(String(ts).replace(' ', 'T')).getTime(); }
+function localStamp(d = new Date()) {
+  const p = (x) => String(x).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+}
 /* The gap is derived from the last send's timestamp, so it is random but the
  * same on every reload and every device, with nothing extra to store. */
 function nextDue(ch) {
   const s = dm.stats[ch] || {};
   if (!s.last_sent_ts) return 0;
-  const c = paceCfg(ch);
+  const c = paceCfg(ch, 'message');
   return tsMs(s.last_sent_ts) + (c.min + strHash(ch + s.last_sent_ts) % (c.max - c.min + 1)) * 60000;
 }
 function mmss(ms) { const s = Math.max(0, Math.round(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
-function paceState(ch) {
+/* "How many this session": a number he types; the count is what went out since. */
+function sessionOf(ch, mode) { try { return JSON.parse(LS.get('sess_' + ch + '_' + mode, 'null')); } catch { return null; } }
+function setSession(ch, mode, target) {
+  LS.set('sess_' + ch + '_' + mode, JSON.stringify(target ? { target, start: localStamp() } : null));
+}
+function sessionCount(ch, mode, s) {
+  const f = mode === 'connect' ? 'requested_ts' : 'sent_ts';
+  return dm.leads.filter((l) => l.channel === ch && l[f] && l[f] >= s.start).length;
+}
+function paceState(ch, mode = modeOf(ch)) {
   const s = dm.stats[ch] || {};
-  const c = paceCfg(ch);
+  const c = paceCfg(ch, mode);
   const now = Date.now();
-  const today = (s.sent_today || 0) + '/' + c.cap + ' today';
-  if (s.cooldown_until && s.cooldown_until * 1000 > now) {
+  const done = mode === 'connect' ? (s.requested_today || 0) : (s.sent_today || 0);
+  let text = done + '/' + c.cap + (mode === 'connect' ? ' requests today' : ' today');
+  if (mode === 'connect' && s.requested_7d) text += ' · ' + s.requested_7d + ' this week';
+  const ss = sessionOf(ch, mode);
+  let sessionDone = false;
+  if (ss && ss.target) {
+    const n = sessionCount(ch, mode, ss);
+    text += ' · session ' + n + '/' + ss.target;
+    sessionDone = n >= ss.target;
+  }
+  if (mode === 'message' && s.cooldown_until && s.cooldown_until * 1000 > now) {
     return { cls: 'err', text: 'Cooling down ' + mmss(s.cooldown_until * 1000 - now) + ' · ' + DM_NAME[ch] + ' said Failed. Stop the batch.', cool: true };
   }
-  if ((s.sent_today || 0) >= c.cap) return { cls: 'warn', text: today + ' · daily cap reached, stop for today', capped: true };
-  const due = nextDue(ch);
-  if (due > now) return { cls: 'wait', text: today + ' · next one in ' + mmss(due - now), wait: due - now };
-  return { cls: 'ok', text: today + ' · ready for the next one' };
+  if (done >= c.cap) return { cls: 'warn', text: text + ' · daily cap reached', capped: true };
+  if (sessionDone) return { cls: 'warn', text: text + ' · session done', sessionDone: true };
+  if (mode === 'message') {
+    const due = nextDue(ch);
+    if (due > now) return { cls: 'wait', text: text + ' · next in ' + mmss(due - now), wait: due - now };
+  }
+  return { cls: 'ok', text: text + (mode === 'connect' ? '' : ' · ready for the next one') };
 }
-/* Returns a warning to confirm before copying, or null when it is fine to send. */
-function paceGate(ch) {
-  const p = paceState(ch);
+/* Returns a warning to confirm first, or null when it is fine to go ahead. */
+function paceGate(ch, mode = modeOf(ch)) {
+  const p = paceState(ch, mode);
   if (p.cool) return { title: DM_NAME[ch] + ' blocked a send. Sending during the cooldown risks a longer block or a label.', go: 'Send anyway' };
-  if (p.capped) return { title: "That's your daily cap. More today raises the spam risk.", go: 'Send anyway' };
+  if (p.capped) {
+    return mode === 'connect'
+      ? { title: "That's your connection-request cap for today. LinkedIn signed you out after about 82 in one day on Sep 28.", go: 'Open anyway' }
+      : { title: "That's your daily cap. More today raises the spam risk.", go: 'Send anyway' };
+  }
+  if (p.sessionDone) return { title: 'You planned ' + sessionOf(ch, mode).target + ' for this session and they are done.', go: 'Keep going' };
   if (p.wait) return { title: 'The next one is due in ' + mmss(p.wait) + '. The random gap keeps this looking human.', go: 'Send early' };
   return null;
 }
@@ -913,8 +963,11 @@ async function dmSave(l, body, quiet) {
     return r.lead;
   } catch (e) { if (!quiet) toast(e.message, true); throw e; }
 }
-async function dmStatus(l, status, extra, msg, undoStatus) {
+/* `undo` is the status to go back to, or a full body ({kind, status}) when the
+ * move changed the lead's kind (an accepted connection became a message lead). */
+async function dmStatus(l, status, extra, msg, undo) {
   const prev = l.status;
+  const undoBody = undo && typeof undo === 'object' ? undo : { status: undo || prev };
   try {
     await dmSave(l, Object.assign({ status }, extra || {}));
     if (status === 'sent') clearCopied(l.id);
@@ -922,7 +975,7 @@ async function dmStatus(l, status, extra, msg, undoStatus) {
     renderDm(l.channel);
     updateDmBadges();
     toast(msg, false, { label: 'Undo', run: async () => {
-      try { await dmSave(l, { status: undoStatus || prev }); buildDmDefaults(); renderDm(l.channel); updateDmBadges(); toast('Undone'); } catch { /* toasted */ }
+      try { await dmSave(l, undoBody); buildDmDefaults(); renderDm(l.channel); updateDmBadges(); toast('Undone'); } catch { /* toasted */ }
     } });
   } catch { /* toasted */ }
 }
@@ -937,7 +990,7 @@ async function dmCopyOpen(l, ta) {
     const url = openUrl(l);
     if (url) window.open(url, '_blank', 'noopener');
   };
-  const gate = paceGate(l.channel);
+  const gate = paceGate(l.channel, 'message');
   if (gate) sheet(gate.title, [{ label: gate.go, run: () => go(true) }]);
   else go(false);
 }
@@ -1006,6 +1059,7 @@ function dmMenu(l) {
   if (l.channel === 'x' && l.recipient_id) acts.push({ label: 'Open DM screen', run: () => window.open(openUrl(l), '_blank', 'noopener') });
   if (l.status === 'ready') {
     if (typeof l.draft_text === 'string') acts.push({ label: 'Reset my edits', run: async () => { delete l.draft_text; renderDm(l.channel); try { await dmSave(l, { draft_text: null }); } catch { /* toasted */ } } });
+    if (l.needs_message) acts.push({ label: 'Skip this person', run: () => dmStatus(l, 'skipped', { reason: 'skipped on phone' }, 'Skipped ' + dmWho(l), 'ready') });
     acts.push({ label: l.channel === 'x' ? 'X said "Failed, try again"' : 'LinkedIn showed a warning or limit',
       danger: true, run: () => dmFailed(l) });
   }
@@ -1174,6 +1228,179 @@ function savedRow(o) {
       } }]) }));
 }
 
+/* -- connect list (LinkedIn): profiles to send a connection request to -- */
+function byTier(a, b) {
+  const ra = TIER_RANK[a.tier] ?? 3, rb = TIER_RANK[b.tier] ?? 3;
+  return ra - rb || (b.score || 0) - (a.score || 0) || byOrder(a, b);
+}
+function daysSince(ts) { return ts ? Math.floor((Date.now() - tsMs(ts)) / 86400000) : null; }
+
+function connectOpen(l, card) {
+  const go = () => {
+    dm.opened.add(l.id);
+    if (card) card.classList.add('opened');
+    window.open(l.profile_url, '_blank', 'noopener');
+  };
+  const gate = paceGate('linkedin', 'connect');
+  if (gate) sheet(gate.title, [{ label: gate.go, run: go }]);
+  else go();
+}
+function connectMenu(l) {
+  const acts = [{ label: 'Open LinkedIn profile', run: () => window.open(l.profile_url, '_blank', 'noopener') }];
+  if (l.site) acts.push({ label: 'Open their site', run: () => window.open(l.site, '_blank', 'noopener') });
+  if (l.status === 'ready') {
+    acts.push({ label: 'Already connected (move to Message)', run: () => dmStatus(l, 'accepted', {}, (l.name || 'They') + ' moved to Message', { kind: 'connect', status: 'ready' }) });
+    acts.push({ label: "Can't connect (dead link, no button)", danger: true, run: () => dmStatus(l, 'cant_dm', { reason: "couldn't connect" }, 'Moved to Done', 'ready') });
+  }
+  if (l.status === 'requested') {
+    acts.push({ label: 'Undo request (back to To connect)', run: () => dmStatus(l, 'ready', {}, 'Back in To connect', 'requested') });
+    acts.push({ label: 'Withdrawn or ignored (move to Done)', danger: true, run: () => dmStatus(l, 'skipped', { reason: 'request withdrawn or ignored' }, 'Moved to Done', 'requested') });
+  }
+  if (l.status === 'skipped' || l.status === 'cant_dm') acts.push({ label: 'Back to To connect', run: () => dmStatus(l, 'ready', {}, 'Back in To connect', l.status) });
+  sheet((l.name || 'Lead') + (l.product ? ' · ' + l.product : ''), acts);
+}
+function connectCard(l, isNext) {
+  const card = el('div', { class: 'card dm-card slim' + (isNext ? ' next' : '') + (dm.opened.has(l.id) ? ' opened' : '') });
+  const sub = [l.product, l.tier, l.score != null ? 'score ' + l.score : null, l.source].filter(Boolean).join(' · ');
+  card.append(whoRow(l.name || '?', sub, () => connectMenu(l)));
+  card.querySelector('.who-name b').textContent = l.name || 'LinkedIn profile';
+  if (l.headline) card.append(el('div', { class: 'headline', text: l.headline }));
+  if (l.tagline) card.append(el('div', { class: 'headline muted', text: (l.product ? l.product + ': ' : '') + l.tagline }));
+  card.append(dmFlags(l, ''));
+  card.append(el('div', { class: 'dm-row' },
+    el('button', { class: 'btn primary grow', text: 'Open LinkedIn', onclick: () => connectOpen(l, card) }),
+    el('button', { class: 'btn ok', text: '✓ Requested', onclick: () => dmStatus(l, 'requested', {}, 'Requested · ' + (l.name || ''), 'ready') }),
+    el('button', { class: 'btn', text: 'Skip', onclick: () => dmStatus(l, 'skipped', { reason: 'skipped on phone' }, 'Skipped ' + (l.name || ''), 'ready') })));
+  return card;
+}
+function requestedRow(l) {
+  const age = daysSince(l.requested_ts);
+  const stale = age !== null && age >= 21;
+  return el('div', { class: 'row-card' + (stale ? ' stale' : '') }, avatar(l.name),
+    el('div', { class: 'grow' },
+      el('b', { text: (l.name || '?') + (l.product ? ' · ' + l.product : '') }),
+      el('div', { class: 'line', text: 'requested ' + agoText(l.requested_ts) + (stale ? ' · 3+ weeks, consider withdrawing it' : '') })),
+    el('button', { class: 'btn sm ok', text: 'Accepted', onclick: () => dmStatus(l, 'accepted', {},
+      (l.name || 'They') + ' accepted. Now in Message.', { kind: 'connect', status: 'requested' }) }),
+    el('button', { class: 'more-btn', text: '⋯', onclick: () => connectMenu(l) }));
+}
+function connectDoneRow(l) {
+  return el('div', { class: 'row-card' }, avatar(l.name),
+    el('div', { class: 'grow' },
+      el('b', { text: (l.name || '?') + ' · ' + (l.status === 'cant_dm' ? "couldn't connect" : 'skipped') }),
+      el('div', { class: 'line', text: l.skip_reason || l.product || '' })),
+    el('button', { class: 'more-btn', text: '⋯', onclick: () => connectMenu(l) }));
+}
+
+/* -- Find more: the Mac pulls fresh launches, Claude checks fit -- */
+const FIND_TEXT = { created: 'Starting…', fetching: 'Looking', scoring: 'Claude is checking fit', fired: 'Claude is checking fit', working: 'Claude is checking fit', done: 'Done', failed: 'Failed' };
+async function loadFind() {
+  try { dm.find = await api('/api/leads/find'); } catch { return; }
+  document.querySelectorAll('.find-card').forEach((n) => {
+    if (!n.contains(document.activeElement)) n.replaceWith(findCard(n.dataset.channel));
+  });
+  clearTimeout(dm.findTimer);
+  const j = dm.find && dm.find.job;
+  if (j && ACTIVE.includes(j.status)) dm.findTimer = setTimeout(async () => { await loadFind(); if (!(dm.find.job && ACTIVE.includes(dm.find.job.status))) refresh(); }, 8000);
+}
+function findCard(ch) {
+  const card = el('div', { class: 'card find-card', 'data-channel': ch });
+  const camps = Object.entries(dm.campaigns).filter(([, v]) => (v.channels || DM_CH).includes(ch));
+  card.append(el('div', { class: 'find-title', text: ch === 'linkedin' ? 'Find more people to connect with' : 'Find more X leads' }));
+  if (!camps.length) {
+    card.append(el('div', { class: 'small muted', text: 'Needs campaign rules first. Ask Claude in Cowork to set up the sidekick campaigns.' }));
+    return card;
+  }
+  const sel = el('select', { 'aria-label': 'Campaign' });
+  camps.forEach(([k, v]) => sel.append(el('option', { value: k, text: v.label || k })));
+  sel.value = camps.some(([k]) => k === LS.get('find_camp_' + ch)) ? LS.get('find_camp_' + ch) : camps[0][0];
+  sel.addEventListener('change', () => LS.set('find_camp_' + ch, sel.value));
+  const want = el('input', { type: 'number', inputmode: 'numeric', min: 1, max: 100, 'aria-label': 'How many', value: LS.get('find_want_' + ch, '20') });
+  want.addEventListener('change', () => LS.set('find_want_' + ch, want.value));
+  const run = dm.find && dm.find.run;
+  const job = dm.find && dm.find.job;
+  const busy = job && ACTIVE.includes(job.status);
+  const btn = el('button', { class: 'btn primary', text: busy ? 'Running…' : 'Find', onclick: async () => {
+    const n = parseInt(want.value, 10);
+    if (!Number.isFinite(n) || n < 1) { toast('Type how many you want', true); return; }
+    btn.disabled = true;
+    try {
+      await api('/api/leads/find', { campaign: sel.value, channel: ch, want: n });
+      toast('Looking. This takes a few minutes; you can keep working.');
+    } catch (e) { toast(e.message, true); }
+    loadFind();
+  } });
+  btn.disabled = !!busy;
+  card.append(el('div', { class: 'find-row' }, sel, want, btn));
+  if (run && run.channel === ch) {
+    const bits = [(FIND_TEXT[job && job.status] || (job && job.status) || '') + (busy && job.progress ? ' · ' + job.progress : '')];
+    if (run.added_count) bits.push('added ' + run.added_count);
+    else if (!busy && run.candidate_count) bits.push(run.candidate_count + ' candidates');
+    bits.push(agoText(run.ts));
+    card.append(el('div', { class: 'small muted find-status', text: (job && job.error ? 'Failed: ' + job.error : bits.filter(Boolean).join(' · ')) }));
+    if (job && job.report && !busy) card.append(el('div', { class: 'small muted find-report', text: job.report }));
+    if (!busy && !run.added_count && run.candidate_count) {
+      card.append(el('button', { class: 'btn block', text: 'Add the top ' + Math.min(run.want, run.candidate_count) + " without Claude's check", onclick: async (e) => {
+        const done = busy2(e.target);
+        try { const r = await api('/api/leads/find/add-unchecked', { job_id: run.job_id }); toast('Added ' + r.added); await refresh(); } catch (err) { toast(err.message, true); }
+        done();
+      } }));
+    }
+  }
+  return card;
+}
+function busy2(btn) { btn.disabled = true; return () => { btn.disabled = false; }; }
+
+/* -- people with no message yet (just accepted, or found on X) -- */
+function needsCard(ch, needs) {
+  const writing = needs.filter((l) => l.writing_job).length;
+  const card = el('div', { class: 'card needs-card' });
+  card.append(el('div', { class: 'find-title', text: needs.length + (needs.length === 1 ? ' person needs' : ' people need') + ' a message' }));
+  for (const l of needs.slice(0, 30)) {
+    const why = l.accepted_ts ? 'accepted ' + agoText(l.accepted_ts) : (l.note || l.flag || l.batch || '');
+    card.append(el('div', { class: 'needs-row' },
+      el('b', { text: dmWho(l) }), el('span', { class: 'muted', text: ' ' + [l.product, why].filter(Boolean).join(' · ') }),
+      el('button', { class: 'more-btn', text: '⋯', onclick: () => dmMenu(l) })));
+  }
+  card.append(el('button', { class: 'btn primary block', text: writing ? 'Claude is writing ' + writing + '…' : '✍ Write with Claude', onclick: async (e) => {
+    const done = busy2(e.target);
+    try { const r = await api('/api/dm/write', { channel: ch }); toast('Claude is writing ' + r.leads + '. Takes a few minutes.'); await refresh(); }
+    catch (err) { toast(err.message, true); }
+    done();
+  } }));
+  if (writing) card.lastChild.disabled = true;
+  return card;
+}
+
+function paceStrip(ch, mode) {
+  const p = paceState(ch, mode);
+  const ss = sessionOf(ch, mode);
+  const inp = el('input', { class: 'sess-input', type: 'number', inputmode: 'numeric', min: 1, max: 500, placeholder: '-', 'aria-label': 'How many this session' });
+  if (ss && ss.target) inp.value = ss.target;
+  inp.addEventListener('change', () => {
+    const v = parseInt(inp.value, 10);
+    setSession(ch, mode, Number.isFinite(v) && v > 0 ? v : 0);
+    inp.blur();
+    renderDm(ch);
+    toast(Number.isFinite(v) && v > 0 ? 'Session started: ' + v + (mode === 'connect' ? ' requests' : ' messages') : 'Session cleared');
+  });
+  return el('div', { class: 'pace ' + p.cls },
+    el('span', { class: 'pace-dot' }), el('span', { class: 'pace-text', text: p.text }),
+    p.cool ? el('button', { class: 'link', text: 'Clear', onclick: () => sheet('End the cooldown early?', [{ label: 'Yes, ' + DM_NAME[ch] + ' is sending again', run: async () => {
+      try { const r = await api('/api/dm/cooldown/clear', { channel: ch }); dm.stats = r.stats; renderDm(ch); } catch (e) { toast(e.message, true); }
+    } }]) }) : null,
+    el('label', { class: 'sess' }, el('span', { text: 'This session' }), inp));
+}
+
+function segBar(segs, current, counts, onPick) {
+  const seg = el('div', { class: 'dseg', role: 'tablist' });
+  for (const [key, label] of segs) {
+    seg.append(el('button', { class: current === key ? 'on' : '', onclick: () => { onPick(key); window.scrollTo(0, 0); } },
+      label + ' ', counts[key] ? el('b', { text: String(counts[key]) }) : null));
+  }
+  return seg;
+}
+
 /* -- panel -- */
 function renderDm(ch, keepLinesOpenFor) {
   const root = $('dm-' + ch);
@@ -1188,27 +1415,28 @@ function renderDm(ch, keepLinesOpenFor) {
     root.replaceChildren(...nodes);
     return;
   }
-  const mine = dm.leads.filter((l) => l.channel === ch);
-  const camps = [...new Set(mine.filter((l) => l.status === 'ready' || l.status === 'sent').map((l) => l.campaign))].filter(Boolean);
+  const mode = modeOf(ch);
+  const all = dm.leads.filter((l) => l.channel === ch);
+  const mine = all.filter((l) => kindOf(l) === (mode === 'connect' ? 'connect' : 'message'));
+
+  if (ch === 'linkedin') {
+    const nConnect = all.filter((l) => kindOf(l) === 'connect' && l.status === 'ready').length;
+    const nMessage = all.filter((l) => kindOf(l) === 'message' && l.status === 'ready').length;
+    nodes.push(el('div', { class: 'modes' },
+      ...[['connect', 'Connect', nConnect], ['message', 'Message', nMessage]].map(([m, label, n]) =>
+        el('button', { class: 'mode' + (mode === m ? ' on' : ''), onclick: () => {
+          dm.mode.linkedin = m; LS.set('dmmode_linkedin', m); renderDm(ch); dmTicker(); window.scrollTo(0, 0);
+        } }, label, n ? el('b', { text: ' ' + n }) : null))));
+  }
+
+  nodes.push(paceStrip(ch, mode));
+
+  const camps = [...new Set(mine.filter((l) => ['ready', 'sent', 'requested'].includes(l.status)).map((l) => l.campaign))].filter(Boolean);
   if (dm.camp[ch] && !camps.includes(dm.camp[ch])) dm.camp[ch] = '';
   const inCamp = (l) => !dm.camp[ch] || l.campaign === dm.camp[ch];
-  const ready = mine.filter((l) => l.status === 'ready' && inCamp(l)).sort(byOrder);
-  const sent = mine.filter((l) => l.status === 'sent' && inCamp(l)).sort((a, b) => (b.sent_ts || '').localeCompare(a.sent_ts || ''));
-  // Replies first: those are the ones that still need an answer.
-  const done = mine.filter((l) => ['replied', 'skipped', 'cant_dm'].includes(l.status) && inCamp(l))
-    .sort((a, b) => ((b.status === 'replied') - (a.status === 'replied'))
-      || (b.updated_ts || '').localeCompare(a.updated_ts || ''));
-
-  const p = paceState(ch);
-  nodes.push(el('div', { class: 'pace ' + p.cls },
-    el('span', { class: 'pace-dot' }), el('span', { class: 'pace-text', text: p.text }),
-    p.cool ? el('button', { class: 'link', text: 'Clear', onclick: () => sheet('End the cooldown early?', [{ label: 'Yes, ' + DM_NAME[ch] + ' is sending again', run: async () => {
-      try { const r = await api('/api/dm/cooldown/clear', { channel: ch }); dm.stats = r.stats; renderDm(ch); } catch (e) { toast(e.message, true); }
-    } }]) }) : null));
-
   if (camps.length > 1) {
     const chips = el('div', { class: 'chips dm-chips' });
-    for (const [val, label] of [['', 'All'], ...camps.map((c) => [c, c.replace(/-/g, ' ')])]) {
+    for (const [val, label] of [['', 'All'], ...camps.map((c) => [c, (dm.campaigns[c] && dm.campaigns[c].label) || c.replace(/-/g, ' ')])]) {
       chips.append(el('button', { class: 'chip' + (dm.camp[ch] === val ? ' on' : ''), text: label, onclick: () => {
         dm.camp[ch] = val; LS.set('dmcamp_' + ch, val); renderDm(ch);
       } }));
@@ -1216,26 +1444,53 @@ function renderDm(ch, keepLinesOpenFor) {
     nodes.push(chips);
   }
 
-  const counts = { send: ready.length, sent: sent.length, done: 0, saved: saved.length };
-  const seg = el('div', { class: 'dseg', role: 'tablist' });
-  for (const [key, label] of DM_SEGS) {
-    seg.append(el('button', { class: dm.seg[ch] === key ? 'on' : '', onclick: () => {
-      dm.seg[ch] = key; LS.set('dmseg_' + ch, key); renderDm(ch); window.scrollTo(0, 0);
-    } }, label + ' ', counts[key] ? el('b', { text: String(counts[key]) }) : null));
+  if (mode === 'connect') {
+    const todo = mine.filter((l) => l.status === 'ready' && inCamp(l)).sort(byTier);
+    const asked = mine.filter((l) => l.status === 'requested' && inCamp(l))
+      .sort((a, b) => (b.requested_ts || '').localeCompare(a.requested_ts || ''));
+    const cdone = mine.filter((l) => ['skipped', 'cant_dm'].includes(l.status) && inCamp(l));
+    nodes.push(segBar(CONNECT_SEGS, dm.cseg, { connect: todo.length, requested: asked.length }, (k) => { dm.cseg = k; LS.set('dmcseg', k); renderDm(ch); }));
+    if (dm.cseg === 'requested') {
+      nodes.push(el('p', { class: 'hint', text: 'When someone accepts, tap Accepted. They move to Message, where Claude can write the first note.' }));
+      nodes.push(...(asked.length ? asked.map(requestedRow) : [el('div', { class: 'empty', text: 'No open requests.' })]));
+    } else if (dm.cseg === 'cdone') {
+      nodes.push(...(cdone.length ? cdone.map(connectDoneRow) : [el('div', { class: 'empty', text: 'Skips and dead links land here.' })]));
+    } else {
+      nodes.push(findCard(ch));
+      nodes.push(el('p', { class: 'hint', text: 'Tap Open LinkedIn, send a plain request (no note), come back and tap Requested. Best leads first.' }));
+      if (!todo.length) nodes.push(el('div', { class: 'empty', text: dm.loaded ? 'Nobody left to connect with. Use Find more.' : 'Loading…' }));
+      todo.forEach((l, i) => nodes.push(connectCard(l, i === 0)));
+    }
+    root.replaceChildren(...nodes);
+    return;
   }
-  nodes.push(seg);
+
+  const ready = mine.filter((l) => l.status === 'ready' && inCamp(l)).sort(byTier);
+  const needs = ready.filter((l) => l.needs_message);
+  const writable = ready.filter((l) => !l.needs_message);
+  const sent = mine.filter((l) => l.status === 'sent' && inCamp(l)).sort((a, b) => (b.sent_ts || '').localeCompare(a.sent_ts || ''));
+  // Replies first: those are the ones that still need an answer.
+  const done = mine.filter((l) => ['replied', 'skipped', 'cant_dm'].includes(l.status) && inCamp(l))
+    .sort((a, b) => ((b.status === 'replied') - (a.status === 'replied'))
+      || (b.updated_ts || '').localeCompare(a.updated_ts || ''));
+  const replied = done.filter((l) => l.status === 'replied').length;
+
+  nodes.push(segBar(DM_SEGS, dm.seg[ch], { send: ready.length, sent: sent.length, done: replied, saved: saved.length },
+    (k) => { dm.seg[ch] = k; LS.set('dmseg_' + ch, k); renderDm(ch); }));
 
   const which = dm.seg[ch];
   if (which === 'send') {
+    if (ch === 'x') nodes.push(findCard(ch));
+    if (needs.length) nodes.push(needsCard(ch, needs));
     nodes.push(el('p', { class: 'hint', text: ch === 'x'
       ? 'Open the profile first: check the product and that their DMs are open. One DM, one gap, then the next. Stop the batch if X ever says Failed.'
       : 'Check the chat first. If an older message already went out, change the first line before you send.' }));
-    if (!ready.length) {
+    if (!writable.length && !needs.length) {
       nodes.push(el('div', { class: 'empty', text: dm.loaded
-        ? 'Nothing to send. Ask Claude in Cowork to load the next ' + DM_NAME[ch] + ' batch into the sidekick.'
+        ? (ch === 'linkedin' ? 'Nothing to send. People land here when they accept your request.' : 'Nothing to send. Use Find more, or ask Claude in Cowork to load a batch.')
         : 'Loading…' }));
     }
-    ready.forEach((l, i) => nodes.push(dmSendCard(l, i === 0, keepLinesOpenFor === l.id)));
+    writable.forEach((l, i) => nodes.push(dmSendCard(l, i === 0, keepLinesOpenFor === l.id)));
   } else if (which === 'sent') {
     nodes.push(el('p', { class: 'hint', text: 'Waiting on a reply. Tap "They replied" when one comes in, and paste it so Claude can draft your answer.' }));
     nodes.push(...(sent.length ? sent.map(dmSentCard) : [el('div', { class: 'empty', text: 'Nothing sent in the last 30 days.' })]));
@@ -1270,7 +1525,7 @@ function renderDmAll() {
 }
 
 /* -- pacing settings -- */
-[['capX', 'cap_x', 20], ['capLi', 'cap_linkedin', 20], ['gapMin', 'gapmin', 1], ['gapMax', 'gapmax', 9]].forEach(([id, key, d]) => {
+[['capX', 'cap_x', 20], ['capLi', 'cap_linkedin', 20], ['capConnect', 'cap_connect', 25], ['gapMin', 'gapmin', 1], ['gapMax', 'gapmax', 9]].forEach(([id, key, d]) => {
   $(id).value = LS.get(key, String(d));
   $(id).addEventListener('change', () => {
     const v = parseInt($(id).value, 10);
@@ -1289,7 +1544,7 @@ function renderSettingsLists() {
     : [el('div', { class: 'hint', text: 'Nobody blocked. Use ⋯ on a post to block someone.' })]));
   $('jobsList').replaceChildren(...(state.jobs.length ? state.jobs.slice(0, 8).map((j) => el('div', { class: 'row-card' },
     el('div', { class: 'grow' },
-      el('b', { text: (j.kind === 'draft' ? 'Drafting' : 'Scout') + ' · ' + (JOB_TEXT[j.status] || j.status) }),
+      el('b', { text: ({ draft: 'Drafting', scout: 'Scout', leadfind: 'Find more', dmwrite: 'Writing messages' }[j.kind] || j.kind) + ' · ' + (JOB_TEXT[j.status] || j.status) }),
       el('div', { class: 'line', text: j.error || j.report || agoText(j.ts) })),
     j.session_url ? el('a', { class: 'link', href: j.session_url, target: '_blank', rel: 'noopener', text: 'Open' }) : null))
     : [el('div', { class: 'hint', text: 'No runs yet.' })]));
