@@ -86,6 +86,14 @@ ARMORY_PASSTHROUGH = env("ARMORY_PASSTHROUGH").rstrip("/")
 
 ROUTINE_FIRE_URL = env("ROUTINE_FIRE_URL")
 ROUTINE_TOKEN = env("ROUTINE_TOKEN")
+# LinkedIn accepts, read from LinkedIn's emails (accept_watch.py). The address is
+# the Gmail the LinkedIn account uses; the password is a Gmail app password.
+LI_ACCEPT_EMAIL = env("LI_ACCEPT_EMAIL")
+LI_ACCEPT_APP_PASSWORD = env("LI_ACCEPT_APP_PASSWORD").replace(" ", "")
+LI_ACCEPT_EVERY_MIN = max(5, int(env("LI_ACCEPT_EVERY_MIN", "10") or 10))
+# Accepted people are moved at once, but Write with Claude starts at most this often,
+# so a run covers everyone accepted since the last one instead of one run each.
+LI_ACCEPT_WRITE_EVERY_MIN = max(10, int(env("LI_ACCEPT_WRITE_EVERY_MIN", "120") or 120))
 
 JOB_TOKEN_TTL = 3 * 3600
 SCOUT_WINDOW_HOURS = 24
@@ -738,6 +746,106 @@ def dm_feedback(body):
     code, res = start_write_job({"ids": [lid]})
     res["saved"] = True
     return code, res
+
+
+# ---------------------------------------------------------------- accepted, from email
+
+def accept_configured():
+    return bool(LI_ACCEPT_EMAIL and LI_ACCEPT_APP_PASSWORD)
+
+
+ACCEPT_RUN_LOCK = threading.Lock()
+
+
+def accept_check(trigger="timer"):
+    """Reads LinkedIn's acceptance emails and moves those people to Message.
+
+    Same move as tapping Accepted on the phone (dm_update), so undo and history
+    work the same. Then starts Write with Claude for whoever needs a message,
+    at most once per LI_ACCEPT_WRITE_EVERY_MIN.
+    """
+    import accept_watch
+    if not accept_configured():
+        return 400, {"error": "LI_ACCEPT_EMAIL / LI_ACCEPT_APP_PASSWORD are not set in server/.env"}
+    if not ACCEPT_RUN_LOCK.acquire(blocking=False):
+        return 409, {"error": "a check is already running"}
+    try:
+        st = load_dm_state()
+        aw = st.get("accept_watch") or {}
+        try:
+            found, checked = accept_watch.fetch_acceptances(LI_ACCEPT_EMAIL, LI_ACCEPT_APP_PASSWORD,
+                                                            days=4, seen=aw.get("seen") or [])
+            err = None
+        except Exception as e:      # wrong password, no network: shown in the app
+            found, checked, err = [], [], "%s: %s" % (type(e).__name__, e)
+        with LOCK:
+            requested = [{"id": l["id"], "name": l.get("name") or "", "slug": linkedin_slug(l.get("profile_url"))}
+                         for l in load_dm_leads()
+                         if l.get("channel") == "linkedin" and lead_kind(l) == "connect" and l.get("status") == "requested"]
+        hits = accept_watch.match(found, requested)
+        moved = []
+        for h in hits:
+            code, _ = dm_update({"id": h["id"], "status": "accepted"})
+            if code == 200:
+                moved.append(h)
+        with LOCK:
+            leads = load_dm_leads()
+            ids = {h["id"] for h in moved}
+            for l in leads:
+                if l["id"] in ids:
+                    l["accepted_by"] = "email"
+            if ids:
+                save_dm_leads(leads)
+            st = load_dm_state()
+            aw = st.get("accept_watch") or {}
+            aw["seen"] = (checked + (aw.get("seen") or []))[:500]
+            aw.update(last_ts=now_str(), last_found=len(moved), error=err, trigger=trigger)
+            if moved:
+                aw["last_moved"] = [{"name": h["name"], "ts": now_str()} for h in moved][:20]
+            st["accept_watch"] = aw
+            save_dm_state(st)
+        if moved:
+            log("accept check: %d accepted (%s)" % (len(moved), ", ".join(h["name"] or "?" for h in moved)))
+        wrote = maybe_autowrite()
+        return 200, {"ok": not err, "error": err, "moved": [h["name"] for h in moved], "writing": wrote}
+    finally:
+        ACCEPT_RUN_LOCK.release()
+
+
+def maybe_autowrite():
+    """Write with Claude for LinkedIn people waiting on a message, throttled."""
+    if not routine_configured():
+        return 0
+    with LOCK:
+        st = load_dm_state()
+        last = (st.get("accept_watch") or {}).get("last_write_ts") or ""
+        due = (datetime.now() - timedelta(minutes=LI_ACCEPT_WRITE_EVERY_MIN)).strftime("%Y-%m-%d %H:%M:%S")
+        if last > due:
+            return 0
+    code, res = start_write_job({"channel": "linkedin"})
+    if code != 200:
+        return 0               # nobody waiting, or a run is already going
+    with LOCK:
+        st = load_dm_state()
+        st.setdefault("accept_watch", {})["last_write_ts"] = now_str()
+        save_dm_state(st)
+    return res.get("leads", 0)
+
+
+def accept_loop():
+    time.sleep(60)             # let the server settle first
+    while True:
+        try:
+            accept_check("timer")
+        except Exception as e:
+            log("accept check failed: %r" % e)
+        time.sleep(LI_ACCEPT_EVERY_MIN * 60)
+
+
+def accept_status():
+    aw = (load_dm_state().get("accept_watch") or {})
+    return {"on": accept_configured(), "every_min": LI_ACCEPT_EVERY_MIN,
+            **{k: aw.get(k) for k in ("last_ts", "last_found", "error", "last_moved")}}
 
 
 def load_dm_campaigns():
@@ -2254,7 +2362,10 @@ class AppHandler(BaseHandler):
                     h.update(armory=armory_configured(), routine=routine_configured(),
                              watchlist=len(parse_watchlist()[0]),
                              sends=len(load_sends()),
-                             dm=True, dm_ready={ch: dm[ch]["ready"] for ch in DM_CHANNELS})
+                             dm=True, dm_ready={ch: dm[ch]["ready"] for ch in DM_CHANNELS},
+                             # Here, not in /api/dm: its clock ticks every check, and
+                             # that would defeat the 304s on the big DM list.
+                             accept_watch=accept_status())
                     return self._json(200, h)
                 if path == "/api/dm":
                     with LOCK:
@@ -2332,6 +2443,8 @@ class AppHandler(BaseHandler):
                 return self._json(*start_write_job(body))
             if path == "/api/dm/feedback":
                 return self._json(*dm_feedback(body))
+            if path == "/api/dm/accept-check":
+                return self._json(*accept_check("phone"))
             if path == "/api/block":
                 with LOCK:
                     return self._json(*block_handle(body))
@@ -2465,6 +2578,11 @@ def main():
     log("data dir %s | armory %s | routine %s | public url %s" % (
         DATA_DIR, "on" if armory_configured() else "OFF", "on" if routine_configured() else "OFF",
         PUBLIC_URL or "(unset)"))
+    if accept_configured():
+        threading.Thread(target=accept_loop, daemon=True).start()
+        log("LinkedIn accepts: checking %s every %d min" % (LI_ACCEPT_EMAIL, LI_ACCEPT_EVERY_MIN))
+    else:
+        log("LinkedIn accepts: off (set LI_ACCEPT_EMAIL + LI_ACCEPT_APP_PASSWORD in .env)")
     try:
         while True:
             time.sleep(3600)

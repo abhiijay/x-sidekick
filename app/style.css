@@ -359,3 +359,4 @@ body.with-actionbar { padding-bottom: calc(var(--tabbar) + 84px + env(safe-area-
 .row-btns { display: flex; gap: 6px; flex: none; }
 .tell-box { display: block; width: calc(100% - 16px); box-sizing: border-box; margin: 0 8px 8px; }
 .action-sheet button.primary { color: var(--accent); }
+.err-text { color: var(--err); }

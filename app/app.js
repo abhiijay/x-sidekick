@@ -209,6 +209,7 @@ async function refresh() {
     if (ch(d)) takeDm(d);
     [['/api/queue', q], ['/api/outreach', o], ['/api/jobs', j], ['/api/blocklist', b], ['/api/dm', d]].forEach(([p, r]) => keepTag(p, r));
     $('dot').className = 'dot ok';
+    state.acceptWatch = h.accept_watch || null;
     if (h.sends != null) $('sendsCount').textContent = 'Replies Claude learns from: ' + h.sends;
     const warn = [];
     if (!h.routine) warn.push('Claude routine is not connected, so drafting is off.');
@@ -1818,9 +1819,32 @@ function connectList(list, nodes) {
       el('button', { class: 'btn sm ' + (dm.opened.has(l.id) ? 'ok-solid' : 'ok'), text: '✓ Sent', onclick: () => dmStatus(l, 'requested', {}, 'Request sent to ' + (l.name || ''), 'ready') }))))));
 }
 
+/* The server reads LinkedIn's "accepted your invitation" emails and moves those
+ * people to Message by itself (accept_watch.py). This line says when it last
+ * looked; Check now runs it immediately. */
+function acceptLine() {
+  const aw = state.acceptWatch;
+  if (!aw || !aw.on) return el('p', { class: 'hint', text: 'When LinkedIn says someone accepted, find them here and tap Accepted. They move to Message.' });
+  const text = aw.error ? 'Email check failed: ' + aw.error
+    : 'Accepts are picked up from your LinkedIn emails every ' + aw.every_min + ' min' + (aw.last_ts ? ' · checked ' + agoText(aw.last_ts) : '')
+      + (aw.last_found ? ' · ' + aw.last_found + ' moved to Message' : '') + '. Tap Accepted for anyone it misses.';
+  return el('div', { class: 'focus-meta' }, el('span', { class: 'small ' + (aw.error ? 'err-text' : 'muted'), text }),
+    el('span', { class: 'spacer' }),
+    el('button', { class: 'link', text: 'Check now', onclick: async (e) => {
+      const done = busy2(e.target);
+      try {
+        const r = await api('/api/dm/accept-check', {});
+        toast(r.error ? 'Check failed: ' + r.error : r.moved.length ? r.moved.length + ' accepted: ' + r.moved.join(', ') : 'Nobody new accepted', !!r.error);
+        await refresh();
+        renderDm('linkedin');
+      } catch (err) { toast(err.message, true); }
+      done();
+    } }));
+}
+
 function requestedList(list, nodes) {
   setDmActions(null);
-  nodes.push(el('p', { class: 'hint', text: 'When LinkedIn says someone accepted, find them here and tap Accepted. They move to Message.' }));
+  nodes.push(acceptLine());
   nodes.push(...searchable('Search who accepted', () => list.filter(matches).map(requestedRow)));
 }
 

@@ -370,3 +370,16 @@ LinkedIn is open. What that changed:
   (leadfind) it, derived from jobs.json. Leads loaded from a Cowork batch have
   none. A finished cloud session cannot write back to the server, so the note,
   not the chat, is what changes future drafts.
+
+### LinkedIn accepts from email (2026-10-01)
+
+`server/accept_watch.py` reads LinkedIn's "accepted your invitation" emails from
+the LinkedIn account's Gmail (IMAP, app password, read-only, every
+`LI_ACCEPT_EVERY_MIN`, default 10) and moves matching Requested leads to Message
+through `dm_update`, the same path as tapping Accepted (`accepted_by: "email"`).
+A match needs the profile slug linked in the email and the subject's first name
+to agree; a full-name-only match counts only when unique. That keeps "people you
+may know" links inside the same email from counting. Write with Claude then
+starts at most every `LI_ACCEPT_WRITE_EVERY_MIN` (120), one run for everyone
+waiting. Status rides in `/api/health` (`accept_watch`), not `/api/dm`, so its
+ticking clock does not break the DM list's 304s. Never touches LinkedIn.
