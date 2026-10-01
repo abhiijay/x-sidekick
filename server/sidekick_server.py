@@ -1297,6 +1297,16 @@ def agent_write_dm(job, body):
                         for v in (it.get("variants") or []) if isinstance(v, dict) and str(v.get("text") or "").strip()]
             if it.get("flag"):
                 lead["flag"] = "; ".join(x for x in (lead.get("flag"), str(it["flag"])[:300]) if x)
+            if it.get("not_a_fit") and lead.get("status") == "ready":
+                # The ICP gate: no message for someone outside the campaign's ICP.
+                # Lands in Done with Claude's reason; "Back" in the app undoes it.
+                lead["status"] = "skipped"
+                lead["skip_reason"] = ("Not a fit (Claude): " + str(it["not_a_fit"]))[:200]
+                lead["not_fit_ts"] = now_str()
+                lead.pop("needs_message", None)
+                lead.pop("writing_job", None)
+                lead["updated_ts"] = now_str()
+                continue
             if variants and lead.get("status") == "ready":
                 lead["variants"] = variants[:3]
                 lead["variant_index"] = 0

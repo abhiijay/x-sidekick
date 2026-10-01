@@ -1628,6 +1628,33 @@ function findStatusText(ch) {
 }
 
 /* One row of chips: today's count, the session, and Find more. */
+/* -- daily goals --
+ * Bars at the top of each outreach tab. Effort goals are per day (requests,
+ * messages, DMs), replies per week because they are not in his hands. The
+ * connect goal sits under the 25 cap, which stays the warning line. */
+const GOALS = { goal_li_connect: 20, goal_li_message: 10, goal_x: 20, goal_replies: 5 };
+function goalOf(k) { const v = parseInt(LS.get(k, ''), 10); return Number.isFinite(v) && v > 0 ? v : GOALS[k]; }
+function repliesThisWeek(ch) {
+  const since = localStamp(new Date(Date.now() - 7 * 86400000));
+  return dm.leads.filter((l) => l.channel === ch && l.reply_ts && l.reply_ts >= since).length;
+}
+function goalBars(ch) {
+  const s = dm.stats[ch] || {};
+  const bars = ch === 'linkedin'
+    ? [['Requests today', s.requested_today || 0, goalOf('goal_li_connect')],
+       ['Messages today', s.sent_today || 0, goalOf('goal_li_message')],
+       ['Replies this week', repliesThisWeek(ch), goalOf('goal_replies')]]
+    : [['DMs today', s.sent_today || 0, goalOf('goal_x')],
+       ['Replies this week', repliesThisWeek(ch), goalOf('goal_replies')]];
+  return el('div', { class: 'goals' }, ...bars.map(([label, n, goal]) => {
+    const fill = el('div', { class: 'goal-fill' });
+    fill.style.width = Math.min(100, Math.round(100 * n / goal)) + '%';
+    return el('button', { class: 'goal' + (n >= goal ? ' done' : ''), title: 'Change goals in Settings', onclick: () => showTab('settings') },
+      el('div', { class: 'goal-top' }, el('span', { text: label }), el('b', { text: n + '/' + goal + (n >= goal ? ' ✓' : '') })),
+      el('div', { class: 'goal-bar' }, fill));
+  }));
+}
+
 function liStatus(mode) {
   const s = dm.stats.linkedin || {};
   const c = paceCfg('linkedin', mode);
@@ -1636,7 +1663,8 @@ function liStatus(mode) {
   const ss = sessionOf('linkedin', mode);
   const row = el('div', { class: 'li-status' });
   row.append(el('button', { class: 'pill-chip' + (done >= c.cap ? ' warn' : ''), onclick: () => showTab('settings'),
-    text: 'Today ' + done + '/' + c.cap }));
+    // The goal bar above shows progress; this chip is the warning line.
+    text: 'Max ' + c.cap + (done >= c.cap ? ' reached' : '') }));
   row.append(el('button', { class: 'pill-chip' + (p.sessionDone ? ' ok' : ss ? ' accent' : ''), onclick: () => openSessionSheet('linkedin', mode),
     text: ss && ss.target ? 'Session ' + sessionCount('linkedin', mode, ss) + '/' + ss.target : '+ Session' }));
   if (mode === 'message' && p.wait) row.append(el('span', { class: 'pill-chip li-next', text: 'Next in ' + mmss(p.wait) }));
@@ -1957,7 +1985,7 @@ function renderLinkedIn(root) {
   const ch = 'linkedin';
   const mode = modeOf(ch);
   const all = dm.leads.filter((l) => l.channel === ch);
-  const nodes = [];
+  const nodes = [goalBars(ch)];
   const nConnect = all.filter((l) => kindOf(l) === 'connect' && l.status === 'ready').length;
   const nMessage = all.filter((l) => kindOf(l) === 'message' && l.status === 'ready' && !l.needs_message).length;
   nodes.push(el('div', { class: 'modes' },
@@ -2052,6 +2080,7 @@ function renderDm(ch, keepLinesOpenFor) {
         } }, label, n ? el('b', { text: ' ' + n }) : null))));
   }
 
+  if (ch === 'x') nodes.push(goalBars('x'));
   nodes.push(paceStrip(ch, mode));
 
   const camps = [...new Set(mine.filter((l) => ['ready', 'sent', 'requested'].includes(l.status)).map((l) => l.campaign))].filter(Boolean);
@@ -2153,7 +2182,8 @@ function renderDmAll() {
 }
 
 /* -- pacing settings -- */
-[['capX', 'cap_x', 20], ['capLi', 'cap_linkedin', 20], ['capConnect', 'cap_connect', 25], ['gapMin', 'gapmin', 1], ['gapMax', 'gapmax', 9]].forEach(([id, key, d]) => {
+[['goalLiConnect', 'goal_li_connect', 20], ['goalLiMsg', 'goal_li_message', 10], ['goalX', 'goal_x', 20], ['goalReplies', 'goal_replies', 5],
+  ['capX', 'cap_x', 20], ['capLi', 'cap_linkedin', 20], ['capConnect', 'cap_connect', 25], ['gapMin', 'gapmin', 1], ['gapMax', 'gapmax', 9]].forEach(([id, key, d]) => {
   $(id).value = LS.get(key, String(d));
   $(id).addEventListener('change', () => {
     const v = parseInt($(id).value, 10);
