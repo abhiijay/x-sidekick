@@ -346,3 +346,27 @@ was set.
 for 10 days; 40 of 72 checked makers had a LinkedIn link; 13 passed the homepage
 gates in 90 s. The account was signed out by LinkedIn after about 82 connection
 requests in one day, which is why the connect cap defaults to 25.
+
+### Light-phone pass (2026-10-01)
+
+His phone has 4GB RAM and runs on mobile data, and Android kills the app while
+LinkedIn is open. What that changed:
+
+- **"Opened" and the current person live in localStorage** (`sk_dmopened`, 12h;
+  `sk_li_focus_*`). In memory, the reload behind LinkedIn wiped the green "Sent?"
+  step. A **✓ Sent** button is now always on the bar too, opened or not.
+- **Refreshes are conditional.** GETs carry the ETag of what is on screen; an
+  unchanged answer is a bodyless 304 and nothing is redrawn. Bodies over 1KB are
+  gzipped (dm 194KB -> 30KB, queue 153KB -> 46KB). Preflights are cached 2h.
+  Only the visible tab is rebuilt; hidden ones draw when opened.
+- **Service worker is cache-first** (`sidekick-v6`), refreshed in the background,
+  so a new app version shows on the second open after a deploy.
+- **LinkedIn opens in the LinkedIn app** (Android intent) by default; Settings
+  can switch to the browser (one reused tab).
+- **Tell Claude** (LinkedIn): a note is stored in `dm-feedback.json` and every
+  dmwrite payload carries the newest 30 as `feedback`. "Save + rewrite this one"
+  sets `fix_note` + `previous_text` and starts a write run for that person. Each
+  lead carries `claude_url`, the session that wrote (dmwrite) or found
+  (leadfind) it, derived from jobs.json. Leads loaded from a Cowork batch have
+  none. A finished cloud session cannot write back to the server, so the note,
+  not the chat, is what changes future drafts.

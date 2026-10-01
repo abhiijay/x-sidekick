@@ -3,7 +3,7 @@
  * because every path is relative to this worker's scope.
  * API calls go to the sidekick server (another origin on GitHub Pages) and
  * are never cached. */
-const CACHE = 'sidekick-v5';
+const CACHE = 'sidekick-v6';
 const SHELL = ['./', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png'];
 
@@ -22,17 +22,18 @@ self.addEventListener('fetch', (e) => {
   const scope = new URL(self.registration.scope).pathname;
   if (e.request.method !== 'GET' || url.origin !== location.origin || !url.pathname.startsWith(scope)) return;
   if (url.pathname.startsWith(scope + 'api/')) return;
-  // Network first so updates land; cache as the offline fallback.
-  // Share launches carry query params: never cache those, fall back to the shell.
-  e.respondWith(
-    fetch(e.request)
-      .then((res) => {
-        if (res.ok && !url.search) {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy));
-        }
-        return res;
-      })
-      .catch(() => caches.match(url.search ? 'index.html' : e.request, { ignoreSearch: true }))
-  );
+  // Cache first, refreshed in the background: on a weak phone over mobile data
+  // the app opens from cache at once instead of waiting on the network (it
+  // reloads often, because Android kills it behind LinkedIn). A new version
+  // lands on the next open. Share launches carry query params: never cache
+  // those, serve the shell.
+  e.respondWith(caches.open(CACHE).then(async (c) => {
+    const hit = await c.match(url.search ? 'index.html' : e.request, { ignoreSearch: !!url.search });
+    const net = url.search && hit ? null : fetch(e.request).then((res) => {
+      if (res.ok && !url.search) c.put(e.request, res.clone());
+      return res;
+    });
+    if (hit) { if (net) e.waitUntil(net.catch(() => {})); return hit; }
+    return net.catch(() => c.match('index.html'));
+  }));
 });

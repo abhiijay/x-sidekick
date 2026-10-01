@@ -25,6 +25,8 @@ LinkedIn. Claude only writes drafts and shortlists back into the queue, and DM
 leads are loaded by server/dm_tool.py; a human presses Reply or Send.
 """
 import base64
+import gzip
+import hashlib
 import hmac
 import json
 import os
@@ -567,6 +569,12 @@ DM_CAMPAIGNS_FILE = os.path.join(DATA_DIR, "dm-campaigns.json")
 # "Find more" never brings back someone who was already connected or messaged.
 DM_TOUCHED_FILE = os.path.join(DATA_DIR, "dm-touched.json")
 FIND_RUNS_FILE = os.path.join(DATA_DIR, "find-runs.json")
+# "Tell Claude" notes from the phone: what to change in the messages it writes.
+# Every Write with Claude run reads the newest ones as standing rules, the same
+# way rejected-drafts.json works for replies.
+DM_FEEDBACK_FILE = os.path.join(DATA_DIR, "dm-feedback.json")
+DM_FEEDBACK_KEEP = 2000
+DM_FEEDBACK_SENT = 30        # newest notes sent to each write run
 DM_CHANNELS = ("linkedin", "x")
 # A lead is kind "message" (default) or kind "connect" (LinkedIn only: a profile
 # to send a connection request to). Connect leads move ready -> requested ->
@@ -659,12 +667,77 @@ def dm_view():
     # `context` is for the writer only; leaving it out keeps the phone's payload small.
     shown = [{k: v for k, v in l.items()
               if k != "context" and not (k == "writing_job" and v not in live)} for l in shown]
+    chats = lead_chats()
+    for l in shown:
+        url = chats.get(l.get("id")) or chats.get(l.get("found_by"))
+        if url:
+            l["claude_url"] = url
     wanted = {l.get("library") for l in shown if l.get("library")}
     libs = {k: v for k, v in load_dm_libraries().items() if k in wanted}
     camps = {k: {"label": v.get("label") or k, "channels": v.get("channels") or list(DM_CHANNELS)}
              for k, v in load_dm_campaigns().items()}
     return {"leads": shown, "libraries": libs, "stats": dm_stats(leads, load_dm_state()),
             "cooldown_min": DM_COOLDOWN_MIN, "campaigns": camps}
+
+
+def lead_chats():
+    """Lead id (or Find more job id) -> the Claude session that worked on it.
+
+    Built from jobs.json, so it also covers leads written before this existed:
+    a dmwrite job's payload lists its lead ids. The newest session wins.
+    """
+    out = {}
+    for j in reversed(load_jobs()):          # jobs are newest first
+        url = j.get("session_url")
+        if not url:
+            continue
+        if j.get("kind") == "dmwrite":
+            for lid in (j.get("payload") or {}).get("lead_ids") or []:
+                out[lid] = url
+        elif j.get("kind") == "leadfind":
+            out[j["id"]] = url
+    return out
+
+
+def load_dm_feedback():
+    return _load(DM_FEEDBACK_FILE, "notes")
+
+
+def dm_feedback(body):
+    """A note from the phone about how Claude writes these messages.
+
+    Always kept as a standing rule for every future write run. With
+    `rewrite: true` the lead also goes back to "needs a message" carrying the
+    note and its current text, and a write run starts for it.
+    """
+    text = str(body.get("text") or "").strip()[:1000]
+    if not text:
+        return 400, {"error": "say what to change"}
+    lid = body.get("id")
+    with LOCK:
+        leads = load_dm_leads()
+        lead = next((l for l in leads if l.get("id") == lid), None) if lid else None
+        notes = load_dm_feedback()
+        notes.insert(0, {"ts": now_str(), "text": text,
+                         "channel": (lead or {}).get("channel") or body.get("channel"),
+                         "campaign": (lead or {}).get("campaign"),
+                         "lead": (lead or {}).get("name") or (lead or {}).get("handle"),
+                         "message": str(body.get("message") or "")[:DM_TEXT_MAX] or None})
+        _save(DM_FEEDBACK_FILE, notes[:DM_FEEDBACK_KEEP], "notes")
+        rewrite = bool(body.get("rewrite")) and lead and lead.get("status") == "ready" \
+            and lead_kind(lead) == "message"
+        if rewrite:
+            lead["fix_note"] = text
+            lead["previous_text"] = str(body.get("message") or "")[:DM_TEXT_MAX]
+            lead["needs_message"] = True
+            lead.pop("draft_text", None)
+            lead["updated_ts"] = now_str()
+            save_dm_leads(leads)
+    if not rewrite:
+        return 200, {"ok": True, "saved": True}
+    code, res = start_write_job({"ids": [lid]})
+    res["saved"] = True
+    return code, res
 
 
 def load_dm_campaigns():
@@ -1078,7 +1151,8 @@ def start_write_job(body):
 def dm_payload_for_write(job):
     ids = set(job["payload"].get("lead_ids") or [])
     keep = ("id", "channel", "campaign", "name", "handle", "profile_url", "product", "tagline", "site",
-            "headline", "meta", "flag", "note", "icp", "tier", "fields", "reply_text", "context")
+            "headline", "meta", "flag", "note", "icp", "tier", "fields", "reply_text", "context",
+            "fix_note", "previous_text")
     leads = [{k: l[k] for k in keep if l.get(k)} for l in load_dm_leads() if l.get("id") in ids]
     camps = load_dm_campaigns()
     used = {l.get("campaign") for l in leads}
@@ -1091,6 +1165,10 @@ def dm_payload_for_write(job):
             "sent_examples": [{"channel": s.get("channel"), "campaign": s.get("campaign"),
                                "text": s.get("text"), "replied": bool(s.get("replied")),
                                "edited_by_him": s.get("verbatim") is False} for s in examples],
+            # His "Tell Claude" notes, newest first: standing rules for these campaigns.
+            "feedback": [{k: n.get(k) for k in ("ts", "text", "campaign", "lead", "message") if n.get(k)}
+                         for n in load_dm_feedback()
+                         if not n.get("campaign") or n.get("campaign") in used][:DM_FEEDBACK_SENT],
             "write_to": "/agent/job/%s/dmwrite" % job["id"]}
 
 
@@ -1116,6 +1194,8 @@ def agent_write_dm(job, body):
                 lead["variant_index"] = 0
                 lead.pop("needs_message", None)
                 lead.pop("draft_text", None)
+                lead.pop("fix_note", None)
+                lead.pop("previous_text", None)
                 lead["written_ts"] = now_str()
                 written += 1
             lead.pop("writing_job", None)
@@ -2003,13 +2083,40 @@ class BaseHandler(BaseHTTPRequestHandler):
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers",
-                             "Content-Type, X-Sidekick-Key, ngrok-skip-browser-warning")
+                             "Content-Type, X-Sidekick-Key, ngrok-skip-browser-warning, If-None-Match")
+            # The app only starts sending If-None-Match once it can read an ETag,
+            # so a phone on a newer app never breaks against an older server.
+            self.send_header("Access-Control-Expose-Headers", "ETag")
+            # Every call carries custom headers, so each needs a CORS preflight.
+            # Caching it (Chrome allows 2h) halves the round trips on mobile data.
+            self.send_header("Access-Control-Max-Age", "7200")
 
     def _json(self, code, payload):
+        """Sends JSON. Light on a phone on mobile data: a GET whose answer has not
+        changed since the app's last copy is a bodyless 304, and anything else
+        over 1KB is gzipped (the queue and DM list shrink about 5x)."""
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        etag = None
+        if code == 200 and self.command == "GET":
+            etag = '"%s"' % hashlib.sha1(body).hexdigest()[:20]
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self._cors()
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+        gz = len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or "")
+        if gz:
+            body = gzip.compress(body, 5)
         self.send_response(code)
         self._cors()
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        if gz:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
+        if etag:
+            self.send_header("ETag", etag)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -2223,6 +2330,8 @@ class AppHandler(BaseHandler):
                 return self._json(*find_add_unchecked(body))
             if path == "/api/dm/write":
                 return self._json(*start_write_job(body))
+            if path == "/api/dm/feedback":
+                return self._json(*dm_feedback(body))
             if path == "/api/block":
                 with LOCK:
                     return self._json(*block_handle(body))

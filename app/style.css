@@ -355,3 +355,7 @@ body.with-actionbar { padding-bottom: calc(var(--tabbar) + 84px + env(safe-area-
 /* "What you actually sent" - the learning-loop input. */
 .sent-label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); margin: 10px 0 4px; }
 .sent-edit textarea { width: 100%; box-sizing: border-box; }
+/* LinkedIn: Sent next to Open in list rows; the Tell Claude sheet */
+.row-btns { display: flex; gap: 6px; flex: none; }
+.tell-box { display: block; width: calc(100% - 16px); box-sizing: border-box; margin: 0 8px 8px; }
+.action-sheet button.primary { color: var(--accent); }

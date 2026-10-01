@@ -11,7 +11,8 @@ const LS = {
   set(k, v) { try { localStorage.setItem('sk_' + k, v); } catch { /* private mode */ } },
 };
 const ACTIVE = ['created', 'fired', 'working', 'fetching', 'scoring'];
-const state = { items: [], outreach: [], jobs: [], blocked: [], scout: null, seg: 'ready', filter: 'all', picked: new Set(), pollTimer: null };
+const state = { items: [], outreach: [], jobs: [], blocked: [], scout: null, seg: 'ready', filter: 'all', picked: new Set(), pollTimer: null,
+  lastRefresh: 0, repliesStale: false };
 
 /* ---------------- api ---------------- */
 
@@ -19,7 +20,7 @@ function serverBase() {
   return (LS.get('server') || location.origin).replace(/\/$/, '');
 }
 
-async function api(path, body) {
+async function api(path, body, etag) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 45000);
   try {
@@ -29,10 +30,12 @@ async function api(path, body) {
         'Content-Type': 'application/json',
         'X-Sidekick-Key': LS.get('password'),
         'ngrok-skip-browser-warning': 'true',
+        ...(etag ? { 'If-None-Match': etag } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: ctl.signal,
     });
+    if (res.status === 304) return { __same: true };
     let data = {};
     try { data = await res.json(); } catch { data = { error: 'server sent non-JSON (' + res.status + ')' }; }
     if (!res.ok) {
@@ -40,6 +43,8 @@ async function api(path, body) {
       err.status = res.status;
       throw err;
     }
+    const tag = res.headers.get('ETag');
+    if (tag && data && typeof data === 'object') Object.defineProperty(data, '__etag', { value: tag });
     return data;
   } catch (e) {
     if (e.name === 'AbortError') throw new Error('server timed out');
@@ -48,6 +53,15 @@ async function api(path, body) {
     clearTimeout(t);
   }
 }
+
+/* GETs the app refreshes on every return from LinkedIn or X. Each carries the
+ * ETag of the copy on screen, so an unchanged answer is a bodyless 304: a few
+ * hundred bytes over mobile data instead of ~80KB, and nothing gets redrawn.
+ * A tag is only remembered once its data is in use (see refresh). An older
+ * server sends no readable ETag, so the app never sends If-None-Match to it. */
+const shownTag = new Map();
+function apiFresh(path) { return api(path, undefined, shownTag.get(path)); }
+function keepTag(path, r) { if (r && r.__etag) shownTag.set(path, r.__etag); }
 
 /* ---------------- helpers ---------------- */
 
@@ -150,6 +164,9 @@ function showTab(name) {
   LS.set('tab', name);
   updateActionbar();
   if (name === 'scout') loadScout();
+  if (name === 'replies' && state.repliesStale) renderReplies();
+  if (name === 'xdm' && typeof renderDm === 'function' && dm.loaded) renderDm('x');
+  if ((name === 'xdm' || name === 'linkedin') && typeof loadFind === 'function' && dm.loaded) loadFind();
   dmTicker();
   // The LinkedIn action bar belongs to that tab only.
   if (name === 'linkedin' && typeof renderDm === 'function' && dm.loaded) renderDm('linkedin');
@@ -176,26 +193,34 @@ async function refresh() {
     showTab('settings');
     return;
   }
+  state.lastRefresh = Date.now();
   try {
-    const [h, q, o, j, b, d] = await Promise.all([api('/api/health'), api('/api/queue'), api('/api/outreach'), api('/api/jobs'),
-      api('/api/blocklist').catch(() => ({ items: [] })),
+    const [h, q, o, j, b, d] = await Promise.all([api('/api/health'), apiFresh('/api/queue'), apiFresh('/api/outreach'), apiFresh('/api/jobs'),
+      apiFresh('/api/blocklist').catch(() => ({ items: [] })),
       // An older server has no /api/dm: the DM tabs then say it needs a restart.
-      api('/api/dm').catch((e) => ({ __error: e }))]);
-    state.items = q.items || [];
-    state.outreach = o.items || [];
-    state.jobs = j.jobs || [];
-    state.blocked = b.items || [];
-    takeDm(d);
+      apiFresh('/api/dm').catch((e) => ({ __error: e }))]);
+    // Only what changed is taken and redrawn. On a 4GB phone, rebuilding every
+    // panel on each return from LinkedIn is what made the app slow to come back.
+    const ch = (r) => !r.__same;
+    if (ch(q)) state.items = q.items || [];
+    if (ch(o)) state.outreach = o.items || [];
+    if (ch(j)) state.jobs = j.jobs || [];
+    if (ch(b)) state.blocked = b.items || [];
+    if (ch(d)) takeDm(d);
+    [['/api/queue', q], ['/api/outreach', o], ['/api/jobs', j], ['/api/blocklist', b], ['/api/dm', d]].forEach(([p, r]) => keepTag(p, r));
     $('dot').className = 'dot ok';
     if (h.sends != null) $('sendsCount').textContent = 'Replies Claude learns from: ' + h.sends;
     const warn = [];
     if (!h.routine) warn.push('Claude routine is not connected, so drafting is off.');
     if (!h.armory) warn.push('Armory is not connected, so scouting is off.');
     banner(warn.join(' '));
-    renderReplies();
-    renderDmAll();
-    renderSettingsLists();
-    if (dm.loaded) loadFind();
+    if (ch(q) || ch(j)) {
+      if (currentTab() === 'replies') renderReplies();
+      else { state.repliesStale = true; $('navBadge').textContent = state.items.filter((i) => i.status === 'drafted').length || ''; }
+    }
+    if (ch(d) || ch(o) || ch(j)) renderDmAll();
+    if (ch(b) || ch(j)) renderSettingsLists();
+    if (dm.loaded && ['linkedin', 'xdm'].includes(currentTab())) loadFind();
     schedulePoll();
   } catch (e) {
     $('dot').className = 'dot err';
@@ -210,6 +235,7 @@ function activeJobs(kind) {
 function schedulePoll() {
   clearTimeout(state.pollTimer);
   if (activeJobs().length) state.pollTimer = setTimeout(async () => {
+    if (document.hidden) return;   // coming back to the app refreshes anyway
     await refresh();
     if (currentTab() === 'scout') loadScout();
   }, 10000);
@@ -353,6 +379,7 @@ function doneRow(it) {
 }
 
 function renderReplies() {
+  state.repliesStale = false;
   const ready = state.items.filter((i) => i.status === 'drafted');
   const waiting = state.items.filter((i) => i.status === 'queued');
   const done = state.items.filter((i) => i.status === 'posted' || i.status === 'skipped').slice(0, 40);
@@ -717,7 +744,22 @@ const dm = {
   seg: { linkedin: LS.get('dmseg_linkedin', 'send'), x: LS.get('dmseg_x', 'send') },
   cseg: LS.get('dmcseg', 'connect'),
   camp: { linkedin: LS.get('dmcamp_linkedin', ''), x: LS.get('dmcamp_x', '') },
-  defaults: {}, pending: {}, timer: null, findTimer: null, opened: new Set(),
+  defaults: {}, pending: {}, timer: null, findTimer: null, opened: null,
+};
+/* Leads he already opened LinkedIn or X for, so the bar can ask "Sent?".
+ * Kept in storage, not memory: a 4GB phone often kills the app while LinkedIn
+ * is open, and the reload used to forget the step. Entries last 12 hours. */
+dm.opened = {
+  ttl: 12 * 3600e3,
+  map: (() => { try { return JSON.parse(LS.get('dmopened', '{}')) || {}; } catch { return {}; } })(),
+  has(id) { return Date.now() - (this.map[id] || 0) < this.ttl; },
+  add(id) { this.map[id] = Date.now(); this.save(); },
+  delete(id) { if (id in this.map) { delete this.map[id]; this.save(); } },
+  save() {
+    const now = Date.now();
+    for (const k of Object.keys(this.map)) if (now - this.map[k] >= this.ttl) delete this.map[k];
+    LS.set('dmopened', JSON.stringify(this.map));
+  },
 };
 function modeOf(ch) { return ch === 'linkedin' && dm.mode.linkedin === 'connect' ? 'connect' : 'message'; }
 function kindOf(l) { return l.kind || 'message'; }
@@ -940,6 +982,22 @@ function openUrl(l) {
   }
   return l.profile_url;
 }
+/* LinkedIn links open in the LinkedIn app (Android) by default: one app that
+ * stays open between profiles, instead of a browser page that reloads
+ * LinkedIn's web app for every person. Settings can switch to the browser,
+ * where one named tab is reused. */
+function openLinkedIn(url) {
+  if (!url) return;
+  if (LS.get('li_open', 'app') === 'app' && /android/i.test(navigator.userAgent)) {
+    try {
+      const u = new URL(url);
+      location.href = 'intent://' + u.host + u.pathname + u.search + '#Intent;scheme=https;package=com.linkedin.android;end';
+      return;
+    } catch { /* bad URL: fall through to the browser */ }
+  }
+  window.open(url, 'sk_linkedin', 'noopener');
+}
+function openLead(l, url) { if (l.channel === 'linkedin') openLinkedIn(url); else if (url) window.open(url, '_blank', 'noopener'); }
 function profileUrl(l) { return l.channel === 'x' ? 'https://x.com/' + encodeURIComponent(handleOf(l.handle)) : l.profile_url; }
 function dmWho(l) { return l.channel === 'x' ? '@' + handleOf(l.handle) : (l.name || 'LinkedIn lead'); }
 /* Rule checks shown on the card. X: no link in message one, <2k followers. */
@@ -999,8 +1057,7 @@ async function dmCopyOpen(l, ta) {
     toast(ok ? 'Copied. Paste it in ' + DM_NAME[l.channel] + ' and press Send.' : 'Copy failed. Long-press the text.', !ok);
     dm.opened.add(l.id);
     if (l.channel === 'linkedin') renderDm('linkedin');   // bar switches to "Sent"
-    const url = openUrl(l);
-    if (url) window.open(url, '_blank', 'noopener');
+    openLead(l, openUrl(l));
   };
   const gate = paceGate(l.channel, 'message');
   if (gate) sheet(gate.title, [{ label: gate.go, run: () => go(true) }]);
@@ -1053,6 +1110,42 @@ async function dmShuffle(l) {
   } catch { /* toasted */ }
 }
 
+/* "Tell Claude": he says what to change in the messages Claude writes. The
+ * server keeps every note as a standing rule that each Write with Claude run
+ * reads, and "rewrite this one" sends the person back with the note and the
+ * old text. The chat link opens the exact session that wrote the message,
+ * with it copied, for anything a note can't carry. */
+function tellClaude(l, ta) {
+  const msg = ta ? ta.value : (l.sent_text || messageOf(l));
+  const box = el('textarea', { class: 'tell-box', rows: 4, placeholder: 'What should change? e.g. "Too long. Never open with their product name."' });
+  const canRewrite = l.status === 'ready' && kindOf(l) === 'message' && !l.needs_message;
+  const save = async (rewrite, btn) => {
+    const text = box.value.trim();
+    if (!text) { toast('Type what to change first', true); box.focus(); return; }
+    btn.disabled = true;
+    try {
+      await api('/api/dm/feedback', { id: l.id, text, message: msg, rewrite });
+      closeSheet();
+      toast(rewrite ? 'Saved. Claude is rewriting ' + dmWho(l) + ' (a few minutes).'
+        : 'Saved. Every message Claude writes from now on follows it.');
+    } catch (e) { closeSheet(); toast(e.message + (rewrite ? '. Your note is saved.' : ''), true); }
+    refresh();
+  };
+  const btns = [];
+  if (canRewrite) btns.push(el('button', { class: 'primary', text: 'Save + rewrite this one', onclick: (e) => save(true, e.target) }));
+  btns.push(el('button', { text: 'Save for next time', onclick: (e) => save(false, e.target) }));
+  if (l.claude_url) btns.push(el('button', { text: 'Open the chat that wrote it ↗', onclick: () => { closeSheet(); openChat(l, msg); } }));
+  sheetCustom('Tell Claude what to change', [
+    el('div', { class: 'sheet-note', text: 'Kept as a rule for every future message' + (l.campaign ? ' in this campaign' : '') + '.' }),
+    box, ...btns]);
+  setTimeout(() => box.focus(), 50);
+}
+async function openChat(l, msg) {
+  const ok = await copy('About the LinkedIn message for ' + dmWho(l) + (l.product ? ' (' + l.product + ')' : '') + ':\n\n' + msg + '\n\nWhat to change: ');
+  toast(ok ? 'Message copied. Paste it in the chat and say what to change.' : 'Opening the chat');
+  window.open(l.claude_url, '_blank', 'noopener');
+}
+
 function dmFailed(l) {
   sheet(l.channel === 'x' ? 'X said "Failed, try again"? That is a spam block.' : 'LinkedIn warned you or hit a limit?', [
     { label: 'Yes - stop and start the cooldown', run: async () => {
@@ -1066,8 +1159,10 @@ function dmFailed(l) {
   ]);
 }
 
-function dmMenu(l) {
-  const acts = [{ label: 'Open profile', run: () => window.open(profileUrl(l), '_blank', 'noopener') }];
+function dmMenu(l, ta) {
+  const acts = [{ label: 'Open profile', run: () => openLead(l, profileUrl(l)) }];
+  if (l.channel === 'linkedin') acts.push({ label: 'Tell Claude what to change', run: () => tellClaude(l, ta) });
+  if (l.channel === 'linkedin' && l.claude_url) acts.push({ label: 'Open the Claude chat that wrote it ↗', run: () => openChat(l, ta ? ta.value : (l.sent_text || messageOf(l))) });
   if (l.channel === 'x' && l.recipient_id) acts.push({ label: 'Open DM screen', run: () => window.open(openUrl(l), '_blank', 'noopener') });
   if (l.status === 'ready') {
     if (typeof l.draft_text === 'string') acts.push({ label: 'Reset my edits', run: async () => { delete l.draft_text; renderDm(l.channel); try { await dmSave(l, { draft_text: null }); } catch { /* toasted */ } } });
@@ -1212,7 +1307,8 @@ function dmSentCard(l) {
     el('button', { class: 'btn', text: 'Cancel', onclick: () => { replyBox.hidden = true; } })));
   card.append(replyBox, el('div', { class: 'dm-row' },
     el('button', { class: 'btn grow', text: 'They replied', onclick: () => { replyBox.hidden = false; rt.focus(); } }),
-    el('button', { class: 'btn', text: 'Open', onclick: () => window.open(openUrl(l), '_blank', 'noopener') })));
+    l.channel === 'linkedin' ? el('button', { class: 'btn', text: 'Tell Claude', onclick: () => tellClaude(l) }) : null,
+    el('button', { class: 'btn', text: 'Open', onclick: () => openLead(l, openUrl(l)) })));
   return card;
 }
 
@@ -1252,14 +1348,15 @@ function connectOpen(l, card) {
     dm.opened.add(l.id);
     if (card) card.classList.add('opened');
     else renderDm('linkedin');   // focus view: the bar switches to "Request sent"
-    window.open(l.profile_url, '_blank', 'noopener');
+    openLinkedIn(l.profile_url);
   };
   const gate = paceGate('linkedin', 'connect');
   if (gate) sheet(gate.title, [{ label: gate.go, run: go }]);
   else go();
 }
 function connectMenu(l) {
-  const acts = [{ label: 'Open LinkedIn profile', run: () => window.open(l.profile_url, '_blank', 'noopener') }];
+  const acts = [{ label: 'Open LinkedIn profile', run: () => openLinkedIn(l.profile_url) }];
+  if (l.claude_url) acts.push({ label: 'Open the Claude chat that found them ↗', run: () => window.open(l.claude_url, '_blank', 'noopener') });
   if (l.site) acts.push({ label: 'Open their site', run: () => window.open(l.site, '_blank', 'noopener') });
   if (l.status === 'ready') {
     acts.push({ label: 'Already connected (move to Message)', run: () => dmStatus(l, 'accepted', {}, (l.name || 'They') + ' moved to Message', { kind: 'connect', status: 'ready' }) });
@@ -1424,7 +1521,8 @@ function segBar(segs, current, counts, onPick) {
  */
 const li = {
   view: { connect: LS.get('li_view_connect', 'focus'), message: LS.get('li_view_message', 'focus') },
-  focus: { connect: null, message: null }, idx: { connect: 0, message: 0 },
+  // Stored so a reload (the phone killing the app behind LinkedIn) lands on the same person.
+  focus: { connect: LS.get('li_focus_connect', '') || null, message: LS.get('li_focus_message', '') || null }, idx: { connect: 0, message: 0 },
   q: '', showNeeds: false,
 };
 const TIER_GROUPS = [['Contact this week', 0], ['Next batch', 1], ['Later', 2], ['No tier', 3]];
@@ -1575,6 +1673,7 @@ function pickFocus(mode, list) {
   if (i < 0) i = Math.min(li.idx[mode], list.length - 1);
   li.focus[mode] = list[i].id;
   li.idx[mode] = i;
+  LS.set('li_focus_' + mode, list[i].id);
   return i;
 }
 function focusOn(mode, id) {
@@ -1674,12 +1773,16 @@ function connectFocus(list, nodes) {
   nodes.push(card);
   const nx = upNext('connect', list, i);
   if (nx) nodes.push(nx);
+  const requested = () => dmStatus(l, 'requested', {}, 'Request sent to ' + (l.name || ''), 'ready');
+  // Sent is always on the bar: he can log a request whether or not the app
+  // remembered that LinkedIn was opened.
   setDmActions(opened ? [
-    el('button', { class: 'btn ok-solid grow', text: '✓ Request sent', onclick: () => dmStatus(l, 'requested', {}, 'Request sent to ' + (l.name || ''), 'ready') }),
+    el('button', { class: 'btn ok-solid grow', text: '✓ Request sent', onclick: requested }),
     el('button', { class: 'btn', text: "Couldn't", onclick: () => dmStatus(l, 'cant_dm', { reason: "couldn't connect" }, 'Moved to Done', 'ready') }),
     el('button', { class: 'btn icon', text: '↗', title: 'Open LinkedIn again', onclick: () => connectOpen(l) }),
   ] : [
     el('button', { class: 'btn primary grow', text: 'Open LinkedIn ↗', onclick: () => connectOpen(l) }),
+    el('button', { class: 'btn ok', text: '✓ Sent', onclick: requested }),
     el('button', { class: 'btn', text: 'Skip', onclick: () => dmStatus(l, 'skipped', { reason: 'skipped on phone' }, 'Skipped ' + (l.name || ''), 'ready') }),
     el('button', { class: 'btn icon', text: '⋯', onclick: () => connectMenu(l) }),
   ]);
@@ -1710,9 +1813,9 @@ function connectList(list, nodes) {
   // In the list, the row's button follows the same two steps as the focus
   // view: Open, then (once opened) Sent.
   nodes.push(...searchable('Search a name or product', () => groupedByTier(list.filter(matches), (l) =>
-    compactRow(l, () => focusOn('connect', l.id), dm.opened.has(l.id)
-      ? el('button', { class: 'btn sm ok-solid', text: '✓ Sent', onclick: () => dmStatus(l, 'requested', {}, 'Request sent to ' + (l.name || ''), 'ready') })
-      : el('button', { class: 'btn sm', text: 'Open ↗', onclick: () => connectOpen(l, null) })))));
+    compactRow(l, () => focusOn('connect', l.id), el('span', { class: 'row-btns' },
+      el('button', { class: 'btn sm', text: '↗', title: 'Open LinkedIn', onclick: () => connectOpen(l, null) }),
+      el('button', { class: 'btn sm ' + (dm.opened.has(l.id) ? 'ok-solid' : 'ok'), text: '✓ Sent', onclick: () => dmStatus(l, 'requested', {}, 'Request sent to ' + (l.name || ''), 'ready') }))))));
 }
 
 function requestedList(list, nodes) {
@@ -1776,6 +1879,10 @@ function messageFocus(list, nodes) {
   if (chips) card.append(chips);
   const { ta, count } = messageBox(l);
   card.append(ta, el('div', { class: 'focus-meta' }, el('span', { class: 'muted small', text: 'Tap the text to edit' }), el('span', { class: 'spacer' }), count));
+  card.append(el('div', { class: 'focus-meta' },
+    el('button', { class: 'link', text: '✎ Tell Claude what to change', onclick: () => tellClaude(l, ta) }),
+    el('span', { class: 'spacer' }),
+    l.claude_url ? el('button', { class: 'link', text: 'Claude chat ↗', onclick: () => openChat(l, ta.value) }) : null));
   card.append(focusNav('message', list, i));
   nodes.push(card);
   const nx = upNext('message', list, i);
@@ -1784,10 +1891,12 @@ function messageFocus(list, nodes) {
     el('button', { class: 'btn ok-solid grow', text: '✓ Sent', onclick: () => dmMarkSent(l, ta) }),
     el('button', { class: 'btn', text: 'Skip', onclick: () => dmStatus(l, 'skipped', { reason: 'skipped on phone' }, 'Skipped ' + dmWho(l), 'ready') }),
     el('button', { class: 'btn icon', text: '↗', title: 'Copy and open again', onclick: () => dmCopyOpen(l, ta) }),
+    el('button', { class: 'btn icon', text: '⋯', onclick: () => dmMenu(l, ta) }),
   ] : [
-    el('button', { class: 'btn primary grow', text: 'Copy + open LinkedIn ↗', onclick: () => dmCopyOpen(l, ta) }),
+    el('button', { class: 'btn primary grow', text: 'Copy + open ↗', onclick: () => dmCopyOpen(l, ta) }),
+    el('button', { class: 'btn ok', text: '✓ Sent', onclick: () => dmMarkSent(l, ta) }),
     el('button', { class: 'btn', text: 'Skip', onclick: () => dmStatus(l, 'skipped', { reason: 'skipped on phone' }, 'Skipped ' + dmWho(l), 'ready') }),
-    el('button', { class: 'btn icon', text: '⋯', onclick: () => dmMenu(l) }),
+    el('button', { class: 'btn icon', text: '⋯', onclick: () => dmMenu(l, ta) }),
   ]);
 }
 
@@ -2010,7 +2119,12 @@ function typingIn(ch) {
  * rebuild a panel under a thumb that is typing; that waits for focus to leave.
  * A tap inside the panel calls renderDm directly and always redraws. */
 function renderDmAll() {
-  DM_CH.forEach((ch) => { if (typingIn(ch)) dm.pending[ch] = true; else renderDm(ch); });
+  const tab = currentTab();
+  // A hidden DM tab is drawn when it is opened (showTab), not on every refresh.
+  DM_CH.forEach((ch) => {
+    if (tab !== (ch === 'x' ? 'xdm' : 'linkedin')) return;
+    if (typingIn(ch)) dm.pending[ch] = true; else renderDm(ch);
+  });
   updateDmBadges();
 }
 
@@ -2040,6 +2154,9 @@ function renderSettingsLists() {
     : [el('div', { class: 'hint', text: 'No runs yet.' })]));
 }
 
+$('liOpen').value = LS.get('li_open', 'app');
+$('liOpen').addEventListener('change', () => LS.set('li_open', $('liOpen').value));
+
 $('serverUrl').value = LS.get('server');
 $('password').value = LS.get('password');
 $('account').value = LS.get('account', 'abhiijayVinayak');
@@ -2060,7 +2177,8 @@ $('saveSettings').addEventListener('click', async (e) => {
 });
 
 $('refreshBtn').addEventListener('click', () => { refresh(); if (currentTab() === 'scout') loadScout(); });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+// Coming back from LinkedIn or X. Unchanged data costs a few 304s and no redraw.
+document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - state.lastRefresh > 3000) refresh(); });
 
 /* ---------------- boot ---------------- */
 

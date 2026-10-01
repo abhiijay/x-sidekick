@@ -383,6 +383,12 @@ connection that just accepted, or a found X lead).
    says exactly what to write, how many versions and their labels), and
    `sent_examples`: first messages he actually sent, the replied ones first.
    `edited_by_him: true` marks wording he changed himself; weight those most.
+   `feedback`: notes he typed on the phone under "Tell Claude", newest first,
+   each with the message it was about. Treat every one as a standing rule for
+   that campaign (or all campaigns when it has none); a newer note beats an
+   older one. A lead with `fix_note` is a rewrite he asked for: `previous_text`
+   is what you wrote last time, `fix_note` says what was wrong. Change exactly
+   that and keep what he did not complain about.
 2. Draft in an Opus subagent (same model rule as replies). Follow the
    campaign's rules to the letter: version labels, length, what may be claimed,
    what must never be claimed. Run the humanizer pass
