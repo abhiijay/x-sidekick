@@ -1649,7 +1649,8 @@ function goalBars(ch) {
   return el('div', { class: 'goals' }, ...bars.map(([label, n, goal]) => {
     const fill = el('div', { class: 'goal-fill' });
     fill.style.width = Math.min(100, Math.round(100 * n / goal)) + '%';
-    return el('button', { class: 'goal' + (n >= goal ? ' done' : ''), title: 'Change goals in Settings', onclick: () => showTab('settings') },
+    // Display only: tapping a bar does nothing (goals are changed in Settings).
+    return el('div', { class: 'goal' + (n >= goal ? ' done' : '') },
       el('div', { class: 'goal-top' }, el('span', { text: label }), el('b', { text: n + '/' + goal + (n >= goal ? ' ✓' : '') })),
       el('div', { class: 'goal-bar' }, fill));
   }));
@@ -1662,7 +1663,7 @@ function liStatus(mode) {
   const done = mode === 'connect' ? (s.requested_today || 0) : (s.sent_today || 0);
   const ss = sessionOf('linkedin', mode);
   const row = el('div', { class: 'li-status' });
-  row.append(el('button', { class: 'pill-chip' + (done >= c.cap ? ' warn' : ''), onclick: () => showTab('settings'),
+  row.append(el('span', { class: 'pill-chip' + (done >= c.cap ? ' warn' : ''),
     // The goal bar above shows progress; this chip is the warning line.
     text: 'Max ' + c.cap + (done >= c.cap ? ' reached' : '') }));
   row.append(el('button', { class: 'pill-chip' + (p.sessionDone ? ' ok' : ss ? ' accent' : ''), onclick: () => openSessionSheet('linkedin', mode),
