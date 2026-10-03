@@ -1,9 +1,19 @@
-"""Who accepted a LinkedIn connection request, read from LinkedIn's own emails.
+"""Who accepted a LinkedIn connection request, and who messaged back, read from
+LinkedIn's own emails. Python stdlib only.
 
-LinkedIn emails the account when someone accepts ("Jane Doe accepted your
-invitation" / "start a conversation with your new connection, Jane Doe"). This
-reads those from the Gmail inbox the LinkedIn account uses, over IMAP with a
-Gmail app password, and returns who accepted. Python stdlib only.
+Three kinds of email, all checked against real ones on 2026-10-04:
+- "Jane accepted your invitation, explore their network": one person, plus
+  "people you may know" links further down (so: name + link must agree).
+- "See Jane's and other people's connections, experience, and more": a batch,
+  "You have 10 new connections", every "View profile:" link is someone who
+  accepted (footer: "You are receiving Accepted Invitation emails"). It lists
+  at most 8 even when there are more, so a few still need a tap on the phone.
+- "Jane just messaged you" / "Jane and Bob sent new messages" (footer:
+  "Messages digest emails"): only the senders are linked, never the text.
+  A message means they are connected, and after his message it is a reply.
+
+Read from the Gmail inbox the LinkedIn account uses, over IMAP with a Gmail app
+password.
 
 It never touches LinkedIn, and it opens the mailbox read-only: nothing is
 marked read, moved or deleted. Bodies are only fetched for emails whose subject
@@ -30,7 +40,11 @@ NAME_RES = (
     re.compile(r"new connection,?\s+(?P<n>.+?)\s*$", re.I),
     re.compile(r"you and (?P<n>.+?) are now connected", re.I),
 )
-SLUG_RE = re.compile(r"linkedin\.com/(?:comm/)?in/([^/?#\s\"'<>&]+)", re.I)
+FROM_RE = re.compile(r"invitations@linkedin\.com|messaging-digest-noreply@linkedin\.com|messages-noreply@linkedin\.com", re.I)
+ACCEPT_FOOTER = "receiving accepted invitation emails"
+MESSAGE_FOOTER = "receiving messages digest emails"
+VIEW_PROFILE_RE = re.compile(r"View profile:\s*\S*linkedin\.com/(?:comm/)?in/([^/?#\s\"'<>&)]+)", re.I)
+SLUG_RE = re.compile(r"linkedin\.com/(?:comm/)?in/([^/?#\s\"'<>&()\[\]]+)", re.I)
 
 
 def _decode(value):
@@ -52,6 +66,44 @@ def subject_name(subject):
 def first_word(name):
     w = re.findall(r"[^\W\d_]+", (name or "").lower())
     return w[0] if w else ""
+
+
+def plain_text(msg):
+    """The text/plain part (it carries the list layout); HTML only as a fallback."""
+    for kind in ("text/plain", "text/html"):
+        for p in (msg.walk() if msg.is_multipart() else [msg]):
+            if p.get_content_type() == kind:
+                try:
+                    return p.get_payload(decode=True).decode(p.get_content_charset() or "utf-8", "replace")
+                except (AttributeError, LookupError):
+                    continue
+    return ""
+
+
+def classify(subject, text):
+    """-> event dict or None.
+
+    {"type": "accepted", "name": str|None, "slugs": [...], "strict": bool}
+      strict: one named person, links must agree with the name (single email).
+      not strict: a batch, every listed profile accepted.
+    {"type": "messaged", "slugs": [...]}: these people sent him a message.
+    """
+    low = (text or "").lower()
+    if MESSAGE_FOOTER in low:
+        return {"type": "messaged", "slugs": slugs_in(text)}
+    if re.search(r"accepted your invitation", subject or "", re.I):
+        return {"type": "accepted", "name": subject_name(subject), "slugs": slugs_in(text), "strict": True}
+    if ACCEPT_FOOTER in low or re.search(r"you have \d+ new connections?", low):
+        listed = []
+        for sl in VIEW_PROFILE_RE.findall(text or ""):
+            sl = urllib.parse.unquote(sl).strip().lower()
+            if sl not in listed:
+                listed.append(sl)
+        return {"type": "accepted", "name": None, "slugs": listed, "strict": False}
+    a = parse_acceptance(subject, text)
+    if a:
+        a.update(type="accepted", strict=True)
+    return a
 
 
 def body_text(msg):
@@ -96,8 +148,18 @@ def match(acceptances, requested):
             by_slug.setdefault(r["slug"].lower(), r)
     hits = {}
     for a in acceptances:
+        if a.get("type", "accepted") != "accepted":
+            continue
         name, slugs = a.get("name"), a.get("slugs") or []
         found = None
+        if a.get("strict") is False:
+            # A batch email: every listed profile accepted. Links are unique ids.
+            for sl in slugs:
+                r = by_slug.get(sl)
+                if r and r["id"] not in hits:
+                    hits[r["id"]] = {"id": r["id"], "name": r.get("name"), "email_subject_name": None,
+                                     "email_ts": a.get("ts")}
+            continue
         if name:
             fw = first_word(name)
             found = next((by_slug[s] for s in slugs if s in by_slug and first_word(by_slug[s]["name"]) == fw), None)
@@ -112,11 +174,12 @@ def match(acceptances, requested):
     return list(hits.values())
 
 
-def fetch_acceptances(user, password, days=4, seen=(), timeout=30):
-    """Acceptance emails from LinkedIn in the last `days` days.
+def fetch_acceptances(user, password, days=21, seen=(), timeout=30):
+    """Accept and message emails from LinkedIn in the last `days` days.
 
-    -> (acceptances, message_ids_checked). `seen` message ids are skipped
-    without fetching their bodies.
+    -> (events, message_ids_checked). Events come from classify(), with "ts"
+    in the Mac's local time (lead timestamps are local). `seen` message ids are
+    skipped without fetching their bodies.
     """
     seen = set(seen)
     box = imaplib.IMAP4_SSL(IMAP_HOST, 993, timeout=timeout)
@@ -129,24 +192,27 @@ def fetch_acceptances(user, password, days=4, seen=(), timeout=30):
         typ, data = box.uid("SEARCH", "X-GM-RAW", '"from:linkedin.com newer_than:%dd"' % int(days))
         uids = (data[0] or b"").split() if typ == "OK" else []
         found, checked = [], []
-        for uid in uids[-300:]:
-            typ, d = box.uid("FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (SUBJECT MESSAGE-ID DATE)])")
+        for uid in uids[-500:]:
+            typ, d = box.uid("FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (SUBJECT MESSAGE-ID DATE FROM)])")
             if typ != "OK" or not d or not isinstance(d[0], tuple):
                 continue
             head = email.message_from_bytes(d[0][1])
             mid = (head.get("Message-ID") or uid.decode()).strip()
             subject = _decode(head.get("Subject"))
-            if mid in seen or not SUBJECT_RE.search(subject):
+            if mid in seen or not (FROM_RE.search(head.get("From") or "") or SUBJECT_RE.search(subject)):
                 continue
             typ, d = box.uid("FETCH", uid, "(BODY.PEEK[])")
             if typ != "OK" or not d or not isinstance(d[0], tuple):
                 continue
             msg = email.message_from_bytes(d[0][1])
-            a = parse_acceptance(subject, body_text(msg))
+            text = plain_text(msg)
+            if not slugs_in(text):          # single-accept emails link only in HTML
+                text = body_text(msg)
+            a = classify(subject, text)
             checked.append(mid)
-            if a:
+            if a and a.get("slugs"):
                 dt = email.utils.parsedate_to_datetime(head.get("Date")) if head.get("Date") else None
-                a["ts"] = dt.strftime("%Y-%m-%d %H:%M:%S") if dt else None
+                a["ts"] = dt.astimezone().strftime("%Y-%m-%d %H:%M:%S") if dt else None
                 found.append(a)
         return found, checked
     finally:

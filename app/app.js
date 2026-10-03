@@ -1669,7 +1669,9 @@ function liStatus(mode) {
   row.append(el('button', { class: 'pill-chip' + (p.sessionDone ? ' ok' : ss ? ' accent' : ''), onclick: () => openSessionSheet('linkedin', mode),
     text: ss && ss.target ? 'Session ' + sessionCount('linkedin', mode, ss) + '/' + ss.target : '+ Session' }));
   if (mode === 'message' && p.wait) row.append(el('span', { class: 'pill-chip li-next', text: 'Next in ' + mmss(p.wait) }));
-  if (mode === 'connect') {
+  // Find more on both lists: the people it finds land in Connect (they need a
+  // request first), but he should not have to switch lists to start a search.
+  {
     const job = dm.find && dm.find.job;
     const busy = job && ACTIVE.includes(job.status) && dm.find.run && dm.find.run.channel === 'linkedin';
     row.append(el('button', { class: 'pill-chip find' + (busy ? ' busy' : ''), onclick: openFindSheet,
@@ -1855,15 +1857,19 @@ function acceptLine() {
   const aw = state.acceptWatch;
   if (!aw || !aw.on) return el('p', { class: 'hint', text: 'When LinkedIn says someone accepted, find them here and tap Accepted. They move to Message.' });
   const text = aw.error ? 'Email check failed: ' + aw.error
-    : 'Accepts are picked up from your LinkedIn emails every ' + aw.every_min + ' min' + (aw.last_ts ? ' · checked ' + agoText(aw.last_ts) : '')
-      + (aw.last_found ? ' · ' + aw.last_found + ' moved to Message' : '') + '. Tap Accepted for anyone it misses.';
+    : 'Accepts and replies are picked up from your LinkedIn emails every ' + aw.every_min + ' min' + (aw.last_ts ? ' · checked ' + agoText(aw.last_ts) : '')
+      + (aw.last_found ? ' · ' + aw.last_found + ' moved to Message' : '') + (aw.last_replies ? ' · ' + aw.last_replies + ' replied' : '')
+      + ". LinkedIn's emails list at most 8 people, so tap Accepted for anyone it misses.";
   return el('div', { class: 'focus-meta' }, el('span', { class: 'small ' + (aw.error ? 'err-text' : 'muted'), text }),
     el('span', { class: 'spacer' }),
     el('button', { class: 'link', text: 'Check now', onclick: async (e) => {
       const done = busy2(e.target);
       try {
         const r = await api('/api/dm/accept-check', {});
-        toast(r.error ? 'Check failed: ' + r.error : r.moved.length ? r.moved.length + ' accepted: ' + r.moved.join(', ') : 'Nobody new accepted', !!r.error);
+        const rp = r.replied || [];
+        toast(r.error ? 'Check failed: ' + r.error
+          : (r.moved.length || rp.length) ? [r.moved.length ? r.moved.length + ' accepted' : '', rp.length ? rp.length + ' replied' : ''].filter(Boolean).join(', ') + ': ' + r.moved.concat(rp).join(', ')
+          : 'Nobody new accepted or replied', !!r.error);
         await refresh();
         renderDm('linkedin');
       } catch (err) { toast(err.message, true); }

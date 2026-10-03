@@ -774,7 +774,7 @@ def accept_check(trigger="timer"):
         aw = st.get("accept_watch") or {}
         try:
             found, checked = accept_watch.fetch_acceptances(LI_ACCEPT_EMAIL, LI_ACCEPT_APP_PASSWORD,
-                                                            days=4, seen=aw.get("seen") or [])
+                                                            days=21, seen=aw.get("seen") or [])
             err = None
         except Exception as e:      # wrong password, no network: shown in the app
             found, checked, err = [], [], "%s: %s" % (type(e).__name__, e)
@@ -783,31 +783,65 @@ def accept_check(trigger="timer"):
                          for l in load_dm_leads()
                          if l.get("channel") == "linkedin" and lead_kind(l) == "connect" and l.get("status") == "requested"]
         hits = accept_watch.match(found, requested)
+        # "X messaged you": a Requested person who writes has accepted; someone in
+        # Sent who writes after his message has replied (the email never has the text).
+        with LOCK:
+            leads_now = load_dm_leads()
+        by_slug = {}
+        for l in leads_now:
+            sl = (linkedin_slug(l.get("profile_url")) or "").lower()
+            if l.get("channel") == "linkedin" and sl:
+                by_slug.setdefault(sl, l)
+        hit_ids = {h["id"] for h in hits}
+        replied = []
+        for ev in found:
+            if ev.get("type") != "messaged":
+                continue
+            for sl in ev.get("slugs") or []:
+                l = by_slug.get(sl)
+                if not l:
+                    continue
+                if lead_kind(l) == "connect" and l.get("status") == "requested" and l["id"] not in hit_ids:
+                    hits.append({"id": l["id"], "name": l.get("name")})
+                    hit_ids.add(l["id"])
+                elif (lead_kind(l) == "message" and l.get("status") == "sent"
+                      and (ev.get("ts") or "") > (l.get("sent_ts") or "~")
+                      and l["id"] not in {r["id"] for r in replied}):
+                    replied.append({"id": l["id"], "name": l.get("name")})
         moved = []
         for h in hits:
             code, _ = dm_update({"id": h["id"], "status": "accepted"})
             if code == 200:
                 moved.append(h)
+        got_reply = []
+        for r in replied:
+            code, _ = dm_update({"id": r["id"], "status": "replied"})
+            if code == 200:
+                got_reply.append(r)
         with LOCK:
             leads = load_dm_leads()
             ids = {h["id"] for h in moved}
+            rids = {r["id"] for r in got_reply}
             for l in leads:
                 if l["id"] in ids:
                     l["accepted_by"] = "email"
-            if ids:
+                if l["id"] in rids:
+                    l["replied_by"] = "email"
+            if ids or rids:
                 save_dm_leads(leads)
             st = load_dm_state()
             aw = st.get("accept_watch") or {}
             aw["seen"] = (checked + (aw.get("seen") or []))[:500]
-            aw.update(last_ts=now_str(), last_found=len(moved), error=err, trigger=trigger)
+            aw.update(last_ts=now_str(), last_found=len(moved), last_replies=len(got_reply), error=err, trigger=trigger)
             if moved:
                 aw["last_moved"] = [{"name": h["name"], "ts": now_str()} for h in moved][:20]
             st["accept_watch"] = aw
             save_dm_state(st)
-        if moved:
-            log("accept check: %d accepted (%s)" % (len(moved), ", ".join(h["name"] or "?" for h in moved)))
+        if moved or got_reply:
+            log("accept check: %d accepted, %d replied" % (len(moved), len(got_reply)))
         wrote = maybe_autowrite()
-        return 200, {"ok": not err, "error": err, "moved": [h["name"] for h in moved], "writing": wrote}
+        return 200, {"ok": not err, "error": err, "moved": [h["name"] for h in moved],
+                     "replied": [r["name"] for r in got_reply], "writing": wrote}
     finally:
         ACCEPT_RUN_LOCK.release()
 
@@ -845,7 +879,7 @@ def accept_loop():
 def accept_status():
     aw = (load_dm_state().get("accept_watch") or {})
     return {"on": accept_configured(), "every_min": LI_ACCEPT_EVERY_MIN,
-            **{k: aw.get(k) for k in ("last_ts", "last_found", "error", "last_moved")}}
+            **{k: aw.get(k) for k in ("last_ts", "last_found", "last_replies", "error", "last_moved")}}
 
 
 def load_dm_campaigns():
