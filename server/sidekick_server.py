@@ -773,11 +773,12 @@ def accept_check(trigger="timer"):
         st = load_dm_state()
         aw = st.get("accept_watch") or {}
         try:
-            found, checked = accept_watch.fetch_acceptances(LI_ACCEPT_EMAIL, LI_ACCEPT_APP_PASSWORD,
-                                                            days=21, seen=aw.get("seen") or [])
+            found, checked, mark = accept_watch.fetch_acceptances(
+                LI_ACCEPT_EMAIL, LI_ACCEPT_APP_PASSWORD, days=21, seen=aw.get("seen") or [],
+                after=aw.get("uid_mark"))
             err = None
         except Exception as e:      # wrong password, no network: shown in the app
-            found, checked, err = [], [], "%s: %s" % (type(e).__name__, e)
+            found, checked, mark, err = [], [], aw.get("uid_mark"), "%s: %s" % (type(e).__name__, e)
         with LOCK:
             requested = [{"id": l["id"], "name": l.get("name") or "", "slug": linkedin_slug(l.get("profile_url"))}
                          for l in load_dm_leads()
@@ -832,6 +833,7 @@ def accept_check(trigger="timer"):
             st = load_dm_state()
             aw = st.get("accept_watch") or {}
             aw["seen"] = (checked + (aw.get("seen") or []))[:500]
+            aw["uid_mark"] = mark
             aw.update(last_ts=now_str(), last_found=len(moved), last_replies=len(got_reply), error=err, trigger=trigger)
             if moved:
                 aw["last_moved"] = [{"name": h["name"], "ts": now_str()} for h in moved][:20]
@@ -2242,6 +2244,11 @@ class BaseHandler(BaseHTTPRequestHandler):
             # Every call carries custom headers, so each needs a CORS preflight.
             # Caching it (Chrome allows 2h) halves the round trips on mobile data.
             self.send_header("Access-Control-Max-Age", "7200")
+            # The app (https://...github.io) may call this server at 127.0.0.1 when
+            # both run on the same phone (Termux). Chrome asks first with this
+            # preflight header; answering it is what allows the direct call.
+            if self.headers.get("Access-Control-Request-Private-Network") == "true":
+                self.send_header("Access-Control-Allow-Private-Network", "true")
 
     def _json(self, code, payload):
         """Sends JSON. Light on a phone on mobile data: a GET whose answer has not

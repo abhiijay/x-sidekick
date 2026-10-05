@@ -174,12 +174,17 @@ def match(acceptances, requested):
     return list(hits.values())
 
 
-def fetch_acceptances(user, password, days=21, seen=(), timeout=30):
+def fetch_acceptances(user, password, days=21, seen=(), timeout=30, after=None):
     """Accept and message emails from LinkedIn in the last `days` days.
 
     -> (events, message_ids_checked). Events come from classify(), with "ts"
     in the Mac's local time (lead timestamps are local). `seen` message ids are
     skipped without fetching their bodies.
+
+    Cheap enough to run every 10 minutes from a phone on mobile data: `after`
+    is {"validity", "uid"} from the last run, so only mail that arrived since is
+    looked at, and all of its headers come back in one FETCH (it used to be one
+    round trip per email, 100+ per run). -> (events, checked, new_after).
     """
     seen = set(seen)
     box = imaplib.IMAP4_SSL(IMAP_HOST, 993, timeout=timeout)
@@ -189,14 +194,25 @@ def fetch_acceptances(user, password, days=21, seen=(), timeout=30):
         typ, _ = box.select('"[Gmail]/All Mail"', readonly=True)
         if typ != "OK":
             box.select("INBOX", readonly=True)
+        validity = (box.untagged_responses.get("UIDVALIDITY") or [b""])[0]
+        validity = validity.decode() if isinstance(validity, bytes) else str(validity)
+        last = int(after["uid"]) if after and after.get("validity") == validity else 0
         typ, data = box.uid("SEARCH", "X-GM-RAW", '"from:linkedin.com newer_than:%dd"' % int(days))
-        uids = (data[0] or b"").split() if typ == "OK" else []
+        uids = [u for u in ((data[0] or b"").split() if typ == "OK" else []) if int(u) > last][-500:]
+        new_after = {"validity": validity, "uid": max([last] + [int(u) for u in uids])}
         found, checked = [], []
-        for uid in uids[-500:]:
-            typ, d = box.uid("FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (SUBJECT MESSAGE-ID DATE FROM)])")
-            if typ != "OK" or not d or not isinstance(d[0], tuple):
+        heads = {}
+        if uids:
+            typ, d = box.uid("FETCH", b",".join(uids), "(UID BODY.PEEK[HEADER.FIELDS (SUBJECT MESSAGE-ID DATE FROM)])")
+            for part in (d or []) if typ == "OK" else []:
+                if isinstance(part, tuple):
+                    m = re.search(rb"UID (\d+)", part[0])
+                    if m:
+                        heads[m.group(1)] = email.message_from_bytes(part[1])
+        for uid in uids:
+            head = heads.get(uid)
+            if head is None:
                 continue
-            head = email.message_from_bytes(d[0][1])
             mid = (head.get("Message-ID") or uid.decode()).strip()
             subject = _decode(head.get("Subject"))
             if mid in seen or not (FROM_RE.search(head.get("From") or "") or SUBJECT_RE.search(subject)):
@@ -214,7 +230,7 @@ def fetch_acceptances(user, password, days=21, seen=(), timeout=30):
                 dt = email.utils.parsedate_to_datetime(head.get("Date")) if head.get("Date") else None
                 a["ts"] = dt.astimezone().strftime("%Y-%m-%d %H:%M:%S") if dt else None
                 found.append(a)
-        return found, checked
+        return found, checked, new_after
     finally:
         try:
             box.logout()

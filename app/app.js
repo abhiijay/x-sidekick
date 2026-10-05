@@ -16,8 +16,27 @@ const state = { items: [], outreach: [], jobs: [], blocked: [], scout: null, seg
 
 /* ---------------- api ---------------- */
 
+/* When the server runs on this same phone (Termux), the app talks to it at
+ * 127.0.0.1 instead of through ngrok: no trip out to ngrok's servers and back
+ * over mobile data, no data used at all. Checked at start and every few
+ * minutes; any failure drops back to the ngrok URL from Settings. Chrome may
+ * ask once to allow access to devices on the local network. */
+const LOCAL_BASE = 'http://127.0.0.1:7790';
+const local = { on: false, checked: 0 };
 function serverBase() {
+  if (local.on) return LOCAL_BASE;
   return (LS.get('server') || location.origin).replace(/\/$/, '');
+}
+async function checkLocal() {
+  if (Date.now() - local.checked < 300000) return;
+  local.checked = Date.now();
+  if (!/android/i.test(navigator.userAgent) || location.hostname === '127.0.0.1' || !LS.get('password')) { local.on = false; return; }
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 1500);
+  try {
+    const r = await fetch(LOCAL_BASE + '/api/health', { headers: { 'X-Sidekick-Key': LS.get('password') }, signal: ctl.signal });
+    local.on = r.ok;
+  } catch { local.on = false; } finally { clearTimeout(t); }
 }
 
 async function api(path, body, etag) {
@@ -47,6 +66,8 @@ async function api(path, body, etag) {
     if (tag && data && typeof data === 'object') Object.defineProperty(data, '__etag', { value: tag });
     return data;
   } catch (e) {
+    // The server on this phone went away: retry once through ngrok.
+    if (local.on && !e.status) { local.on = false; local.checked = Date.now(); return api(path, body, etag); }
     if (e.name === 'AbortError') throw new Error('server timed out');
     throw e;
   } finally {
@@ -61,7 +82,34 @@ async function api(path, body, etag) {
  * server sends no readable ETag, so the app never sends If-None-Match to it. */
 const shownTag = new Map();
 function apiFresh(path) { return api(path, undefined, shownTag.get(path)); }
-function keepTag(path, r) { if (r && r.__etag) shownTag.set(path, r.__etag); }
+/* The last copy of each list is also kept on the phone, so a cold start (the
+ * phone killed the app) draws at once from it and then only asks the server
+ * "changed?", which is usually a bodyless 304. */
+function keepTag(path, r) {
+  if (!(r && r.__etag)) return;
+  shownTag.set(path, r.__etag);
+  LS.set('cache_' + path, JSON.stringify({ etag: r.__etag, data: r }));
+}
+function applyData(path, r) {
+  if (path === '/api/queue') state.items = r.items || [];
+  else if (path === '/api/outreach') state.outreach = r.items || [];
+  else if (path === '/api/jobs') state.jobs = r.jobs || [];
+  else if (path === '/api/blocklist') state.blocked = r.items || [];
+  else if (path === '/api/dm') takeDm(r);
+}
+function bootFromCache() {
+  let any = false;
+  for (const path of ['/api/queue', '/api/outreach', '/api/jobs', '/api/blocklist', '/api/dm']) {
+    try {
+      const c = JSON.parse(LS.get('cache_' + path, 'null'));
+      if (!c || !c.etag || !c.data) continue;
+      applyData(path, c.data);
+      shownTag.set(path, c.etag);
+      any = true;
+    } catch { /* a bad cache entry is just skipped */ }
+  }
+  if (any) renderReplies();
+}
 
 /* ---------------- helpers ---------------- */
 
@@ -194,6 +242,7 @@ async function refresh() {
     return;
   }
   state.lastRefresh = Date.now();
+  await checkLocal();
   try {
     const [h, q, o, j, b, d] = await Promise.all([api('/api/health'), apiFresh('/api/queue'), apiFresh('/api/outreach'), apiFresh('/api/jobs'),
       apiFresh('/api/blocklist').catch(() => ({ items: [] })),
@@ -202,13 +251,11 @@ async function refresh() {
     // Only what changed is taken and redrawn. On a 4GB phone, rebuilding every
     // panel on each return from LinkedIn is what made the app slow to come back.
     const ch = (r) => !r.__same;
-    if (ch(q)) state.items = q.items || [];
-    if (ch(o)) state.outreach = o.items || [];
-    if (ch(j)) state.jobs = j.jobs || [];
-    if (ch(b)) state.blocked = b.items || [];
-    if (ch(d)) takeDm(d);
+    [['/api/queue', q], ['/api/outreach', o], ['/api/jobs', j], ['/api/blocklist', b], ['/api/dm', d]]
+      .forEach(([p, r]) => { if (ch(r)) applyData(p, r); });
     [['/api/queue', q], ['/api/outreach', o], ['/api/jobs', j], ['/api/blocklist', b], ['/api/dm', d]].forEach(([p, r]) => keepTag(p, r));
     $('dot').className = 'dot ok';
+    $('dot').title = local.on ? 'connected directly (server on this phone)' : 'connected';
     state.acceptWatch = h.accept_watch || null;
     if (h.sends != null) $('sendsCount').textContent = 'Replies Claude learns from: ' + h.sends;
     const warn = [];
@@ -2277,6 +2324,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && Da
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
 handleShareLaunch();
+bootFromCache();
 renderDmAll();
 const startTab = LS.get('tab', 'replies');
 showTab(startTab === 'settings' && LS.get('password') ? 'replies' : startTab);

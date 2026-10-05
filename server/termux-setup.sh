@@ -95,6 +95,8 @@ cat > "$PREFIX/bin/sidekick" <<'EOF'
 # Start (or restart) the sidekick server + ngrok tunnel in the background.
 REPO="$HOME/x-sidekick"; ENV_FILE="$REPO/server/.env"
 termux-wake-lock
+# Pick up fixes pushed to GitHub (app fixes need none, server fixes need this).
+git -C "$REPO" pull --ff-only -q 2>/dev/null && echo "Code: $(git -C "$REPO" log -1 --format='%h %s')"
 pkill -f sidekick_server.py 2>/dev/null; pkill -f "ngrok http" 2>/dev/null; sleep 1
 domain=$(grep -E '^NGROK_DOMAIN=' "$ENV_FILE" | cut -d= -f2-)
 flag=""
