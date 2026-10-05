@@ -277,6 +277,20 @@ function voiceLabel(angle) {
   return first && first.length <= 24 ? first : 'Draft';
 }
 
+/* The draft he tapped Reply (or Copy) on, per post. Stored, not in memory: the
+ * phone often kills the app behind X, and every refresh rebuilds the card, so
+ * an in-memory pick was gone by the time he came back. Cleared when the post
+ * is finished; stale ones are dropped on render. */
+function getPick(id) { try { return JSON.parse(LS.get('pick_' + id, 'null')); } catch { return null; } }
+function setPick(id, idx, text) { LS.set('pick_' + id, JSON.stringify({ idx, text })); }
+function clearPick(id) { try { localStorage.removeItem('sk_pick_' + id); } catch { /* ignore */ } }
+function prunePicks(liveIds) {
+  try {
+    Object.keys(localStorage).filter((k) => k.startsWith('sk_pick_') && !liveIds.has(k.slice(8)))
+      .forEach((k) => localStorage.removeItem(k));
+  } catch { /* ignore */ }
+}
+
 function draftCard(it) {
   const card = el('div', { class: 'card' },
     whoRow(it.author, ago(it.ts) + (it.author_followers ? ' · ' + num(it.author_followers) + ' followers' : ''), () => itemMenu(it)),
@@ -285,7 +299,11 @@ function draftCard(it) {
 
   let chosen = typeof it.chosen_index === 'number' ? it.chosen_index : null;
   const sent = el('textarea', { rows: 2, placeholder: 'What you actually sent (teaches Claude your voice)' });
+  const saved = getPick(it.id);
+  const savedOk = saved && it.drafts && it.drafts[saved.idx] && it.drafts[saved.idx].text === saved.text;
+  if (savedOk) chosen = saved.idx;
   if (it.posted_text) { sent.value = it.posted_text; sent.dataset.dirty = '1'; }
+  else if (savedOk) sent.value = saved.text;
   // Auto-save: at 100 replies a day a separate Save tap per item is friction the
   // learning loop cannot afford, and an unsaved edit teaches nothing.
   let sentTimer;
@@ -319,6 +337,7 @@ function draftCard(it) {
       el('div', { class: 'draft-text', text: d.text }));
     const pick = () => {
       chosen = idx;
+      setPick(it.id, idx, d.text);
       drafts.querySelectorAll('.draft').forEach((n, k) => n.classList.toggle('chosen', k === idx));
       if (!sent.dataset.dirty) sent.value = d.text;
     };
@@ -382,6 +401,7 @@ function doneRow(it) {
 function renderReplies() {
   state.repliesStale = false;
   const ready = state.items.filter((i) => i.status === 'drafted');
+  prunePicks(new Set(ready.map((i) => i.id)));
   const waiting = state.items.filter((i) => i.status === 'queued');
   const done = state.items.filter((i) => i.status === 'posted' || i.status === 'skipped').slice(0, 40);
   $('readyCount').textContent = ready.length || '';
@@ -412,6 +432,7 @@ function renderReplies() {
 async function finish(it, status, postedText, chosen, btn, verbatim) {
   const done = busy(btn, '…');
   try {
+    clearPick(it.id);
     const body = { id: it.id, status };
     if (typeof postedText === 'string') body.posted_text = postedText;
     if (typeof chosen === 'number') body.chosen_index = chosen;
