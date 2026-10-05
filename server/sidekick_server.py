@@ -434,6 +434,45 @@ def reject_draft(body):
     return 200, {"ok": True, "left": len(drafts)}
 
 
+def draft_retry(body):
+    """"Retry with Claude" on one post: redraft it, with his note on what to change.
+
+    The drafts he is throwing away go to rejected-drafts.json with the note as
+    the reason (the negative half of the learning loop, same as Reject), and
+    ride along as `previous_drafts` with `retry_note` so the new three are not
+    the old three reworded.
+    """
+    item_id = body.get("id")
+    note = str(body.get("note") or "").strip()[:500]
+    with LOCK:
+        items = load_queue()
+        it = next((i for i in items if i.get("id") == item_id), None)
+        if not it:
+            return 404, {"error": "id not found"}
+        if it.get("status") not in ("drafted", "queued"):
+            return 400, {"error": "only a post waiting for a reply can be redrafted"}
+        old = it.get("drafts") or []
+        if old:
+            rejects = _load(REJECTS_FILE, "rejects")
+            for d in old:
+                rejects.insert(0, {"ts": now_str(),
+                                   "post": (it.get("tweet_text") or it.get("text") or "")[:600],
+                                   "author": it.get("author"),
+                                   "url": it.get("tweet_url") or it.get("url"),
+                                   "text": d.get("text", ""), "angle": d.get("angle", ""),
+                                   "reason": note or "redo asked, no reason given"})
+            _save(REJECTS_FILE, rejects[:REJECTS_KEEP], "rejects")
+            it["previous_drafts"] = [d.get("text", "") for d in old][:6]
+        it["retry_note"] = note
+        it["drafts"] = []
+        it["status"] = "queued"
+        # Nothing went out for this post yet, so a pre-filled "what you sent" goes too.
+        for k in ("chosen_index", "drafted_ts", "posted_text", "sent_verbatim"):
+            it.pop(k, None)
+        save_queue(items)
+    return start_draft_job([item_id], body.get("account"), note)
+
+
 def queue_clear_done():
     cutoff = time.time() - 7 * 86400
     items = load_queue()
@@ -2051,6 +2090,8 @@ def agent_write_drafts(job, body):
                 it["agent_note"] = str(r["agent_note"])[:500]
             if drafts and it.get("status") == "queued":
                 it["drafts"] = drafts[:6]
+                it.pop("previous_drafts", None)
+                it.pop("retry_note", None)
                 it["status"] = "drafted"
                 it["drafted_ts"] = now_str()
                 written += 1
@@ -2506,6 +2547,8 @@ class AppHandler(BaseHandler):
                 return self._json(*scout_pick(body))
             if path == "/api/sends/add":
                 return self._json(*add_send(body))
+            if path == "/api/draft/retry":
+                return self._json(*draft_retry(body))
             if path == "/api/draft/reject":
                 return self._json(*reject_draft(body))
             if path == "/api/scout/dismiss":

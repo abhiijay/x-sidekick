@@ -71,6 +71,10 @@ workspace path lives under `knowledge/`:
      draft only for that account (`k77builds`, `kshetezVinayak`, or
      `abhiijayVinayak`, which uses the three-voice set below)
    - `note`: optional context from the user
+   - An item with `previous_drafts` is a redo he asked for with "Retry with
+     Claude". `retry_note` says what was wrong (may be empty). Those drafts are
+     rejected: write three new ones that take different angles, not rewordings,
+     and fix exactly what the note says.
    - `voice_examples`: recent replies the user actually posted (`posted_text`).
      This is the voice ground truth; give it mild extra weight, as the guide says.
    - `people`: what he already knows about the authors **in this batch only**.

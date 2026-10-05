@@ -219,6 +219,8 @@ function showTab(name) {
   // The LinkedIn action bar belongs to that tab only.
   if (name === 'linkedin' && typeof renderDm === 'function' && dm.loaded) renderDm('linkedin');
   else if (typeof setDmActions === 'function') setDmActions(null);
+  // The one-by-one Replies view owns the bar on its tab (Ready segment only).
+  if (name === 'replies' && typeof renderReady === 'function') renderReplies();
   window.scrollTo(0, 0);
 }
 document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -228,6 +230,8 @@ function showSeg(name) {
   state.seg = name;
   document.querySelectorAll('.seg button').forEach((b) => b.classList.toggle('on', b.dataset.seg === name));
   document.querySelectorAll('[data-segpanel]').forEach((p) => { p.hidden = p.dataset.segpanel !== name; });
+  // The Posted / Skip / Retry bar belongs to the Ready post on screen only.
+  if (typeof renderReady === 'function') { if (name === 'ready') renderReplies(); else setDmActions(null); }
 }
 document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => showSeg(b.dataset.seg)));
 
@@ -313,6 +317,7 @@ function itemMenu(it) {
   const actions = [];
   if (postUrl(it)) actions.push({ label: 'Open post on X', run: () => window.open(postUrl(it), '_blank', 'noopener') });
   if (it.status === 'queued') actions.push({ label: 'Draft just this one', run: () => askDraft([it.id]) });
+  if (it.status === 'drafted') actions.push({ label: '↻ Retry with Claude', run: () => retryDraft(it) });
   if (it.status === 'queued' || it.status === 'drafted') actions.push({ label: 'Skip', run: () => setStatus(it, 'skipped') });
   if (it.status === 'posted' || it.status === 'skipped') actions.push({ label: 'Move back to waiting', run: () => setStatus(it, 'queued') });
   if (h) actions.push({ label: 'Block @' + h, danger: true, run: () => blockUser(h) });
@@ -330,24 +335,55 @@ function voiceLabel(angle) {
  * is finished; stale ones are dropped on render. */
 function getPick(id) { try { return JSON.parse(LS.get('pick_' + id, 'null')); } catch { return null; } }
 function setPick(id, idx, text) { LS.set('pick_' + id, JSON.stringify({ idx, text })); }
-function clearPick(id) { try { localStorage.removeItem('sk_pick_' + id); } catch { /* ignore */ } }
+/* Drafts he edited in place, per post: {index: text}. His wording, so it is
+ * what Copy and Reply use and what gets recorded as hand-written. */
+function getEdits(id) { try { return JSON.parse(LS.get('dedit_' + id, '{}')) || {}; } catch { return {}; } }
+function setEdit(id, idx, text) { const e = getEdits(id); e[idx] = text; LS.set('dedit_' + id, JSON.stringify(e)); }
+function clearPick(id) { try { localStorage.removeItem('sk_pick_' + id); localStorage.removeItem('sk_dedit_' + id); } catch { /* ignore */ } }
 function prunePicks(liveIds) {
   try {
-    Object.keys(localStorage).filter((k) => k.startsWith('sk_pick_') && !liveIds.has(k.slice(8)))
-      .forEach((k) => localStorage.removeItem(k));
+    Object.keys(localStorage).forEach((k) => {
+      const m = k.match(/^sk_(pick|dedit)_(.+)$/);
+      if (m && !liveIds.has(m[2])) localStorage.removeItem(k);
+    });
   } catch { /* ignore */ }
 }
 
-function draftCard(it) {
-  const card = el('div', { class: 'card' },
+/* Retry with Claude: the current drafts are thrown away (kept as rejected
+ * examples with his note as the reason) and the post is redrafted. */
+function retryDraft(it) {
+  const box = el('textarea', { class: 'tell-box', rows: 3, placeholder: 'What was wrong? (optional) e.g. "too long, and ask them something"' });
+  sheetCustom('Redraft @' + handleOf(it.author) + ' with Claude', [
+    el('div', { class: 'sheet-note', text: 'These drafts are dropped and saved as examples of what not to write.' }),
+    box,
+    el('button', { class: 'primary', text: '↻ Redraft with Claude', onclick: async (e) => {
+      e.target.disabled = true;
+      try {
+        const r = await api('/api/draft/retry', { id: it.id, note: box.value.trim(), account: LS.get('account', 'abhiijayVinayak') });
+        closeSheet();
+        clearPick(it.id);
+        toast(r.job && r.job.status === 'failed' ? (r.job.error || 'Claude run failed') : 'Claude is redrafting. It comes back here in a few minutes.', r.job && r.job.status === 'failed');
+      } catch (err) { closeSheet(); toast(err.message, true); }
+      refresh();
+    } })]);
+  setTimeout(() => box.focus(), 50);
+}
+
+/* One post with its drafts. opts.focus: the one-at-a-time view, where Posted,
+ * Skip and Retry live in the bottom bar (returned as `actions`) instead of
+ * the card's foot. */
+function draftCard(it, opts = {}) {
+  const card = el('div', { class: 'card' + (opts.focus ? ' focus-card' : '') },
     whoRow(it.author, ago(it.ts) + (it.author_followers ? ' · ' + num(it.author_followers) + ' followers' : ''), () => itemMenu(it)),
     postBlock(postText(it)));
   if (it.agent_note) card.append(el('div', { class: 'flag' }, el('b', { text: '!' }), el('span', { text: it.agent_note })));
 
   let chosen = typeof it.chosen_index === 'number' ? it.chosen_index : null;
   const sent = el('textarea', { rows: 2, placeholder: 'What you actually sent (teaches Claude your voice)' });
+  const edits = getEdits(it.id);
+  const textOf = (idx) => (typeof edits[idx] === 'string' ? edits[idx] : (it.drafts[idx] || {}).text);
   const saved = getPick(it.id);
-  const savedOk = saved && it.drafts && it.drafts[saved.idx] && it.drafts[saved.idx].text === saved.text;
+  const savedOk = saved && it.drafts && it.drafts[saved.idx] && textOf(saved.idx) === saved.text;
   if (savedOk) chosen = saved.idx;
   if (it.posted_text) { sent.value = it.posted_text; sent.dataset.dirty = '1'; }
   else if (savedOk) sent.value = saved.text;
@@ -380,23 +416,43 @@ function draftCard(it) {
   (it.drafts || []).forEach((d, idx) => {
     const angle = el('div', { class: 'angle', text: d.angle || '' });
     angle.hidden = true;
-    const box = el('div', { class: 'draft' + (chosen === idx ? ' chosen' : '') },
-      el('div', { class: 'draft-text', text: d.text }));
+    const edited = typeof edits[idx] === 'string';
+    const txt = el('div', { class: 'draft-text', text: textOf(idx) });
+    const box = el('div', { class: 'draft' + (chosen === idx ? ' chosen' : '') + (edited ? ' edited' : '') }, txt);
     const pick = () => {
       chosen = idx;
-      setPick(it.id, idx, d.text);
+      const t = textOf(idx);
+      setPick(it.id, idx, t);
       drafts.querySelectorAll('.draft').forEach((n, k) => n.classList.toggle('chosen', k === idx));
-      if (!sent.dataset.dirty) sent.value = d.text;
+      if (typeof edits[idx] === 'string') {
+        // His own wording: recorded as hand-written, the strongest voice signal.
+        sent.value = t; sent.dataset.dirty = '1'; saveSent(true);
+      } else if (!sent.dataset.dirty) sent.value = t;
+    };
+    const edit = () => {
+      const ta = el('textarea', { class: 'draft-edit', rows: 3 });
+      ta.value = textOf(idx);
+      const done = () => {
+        const v = ta.value.trim();
+        if (v && v !== d.text) { edits[idx] = v; setEdit(it.id, idx, v); box.classList.add('edited'); }
+        txt.textContent = textOf(idx);
+        ta.replaceWith(txt);
+        pick();
+      };
+      ta.addEventListener('blur', done);
+      txt.replaceWith(ta);
+      ta.focus();
     };
     box.append(el('div', { class: 'draft-foot' },
       el('button', { class: 'voice', text: voiceLabel(d.angle), title: 'Why this reply', onclick: () => { angle.hidden = !angle.hidden; } }),
       el('span', { class: 'spacer' }),
       el('button', { class: 'btn sm', text: 'Reject', title: 'Bad reply - drop it and record why',
         onclick: () => rejectDraft(it, idx, d) }),
-      el('button', { class: 'btn sm', text: 'Copy', onclick: async () => { pick(); toast((await copy(d.text)) ? 'Copied' : 'Copy failed', false); } }),
+      el('button', { class: 'btn sm', text: 'Edit', onclick: edit }),
+      el('button', { class: 'btn sm', text: 'Copy', onclick: async () => { pick(); toast((await copy(textOf(idx))) ? 'Copied' : 'Copy failed', false); } }),
       el('button', { class: 'btn sm primary', text: 'Reply', onclick: async () => {
         pick();
-        const ok = await copy(d.text);
+        const ok = await copy(textOf(idx));
         toast(ok ? 'Copied. Paste it on X.' : 'Copy failed. Long-press the text.', !ok);
         if (postUrl(it)) window.open(postUrl(it), '_blank', 'noopener');
       } })), angle);
@@ -404,8 +460,7 @@ function draftCard(it) {
   });
   card.append(drafts);
 
-  card.append(sentWrap, el('div', { class: 'card-foot' },
-    el('button', { class: 'btn primary', text: 'Posted', onclick: (e) => {
+  const posted = (e) => {
       const typed = sent.value.trim();
       if (typed) { finish(it, 'posted', typed, chosen, e.target, sent.dataset.dirty === '1' ? false : null); return; }
       // Nothing typed. Ask instead of assuming the draft is what he sent - that
@@ -419,7 +474,20 @@ function draftCard(it) {
         { label: 'Just mark posted (do not learn from it)',
           run: () => finish(it, 'posted', undefined, chosen, e.target) },
       ]);
-    } }),
+  };
+  card.append(sentWrap);
+  if (opts.focus) {
+    card.actions = [
+      el('button', { class: 'btn ok-solid grow', text: '✓ Posted', onclick: posted }),
+      el('button', { class: 'btn', text: 'Skip', onclick: () => setStatus(it, 'skipped') }),
+      el('button', { class: 'btn', text: '↻ Retry', title: 'Redraft with Claude', onclick: () => retryDraft(it) }),
+      el('button', { class: 'btn icon', text: '⋯', onclick: () => itemMenu(it) }),
+    ];
+    return card;
+  }
+  card.append(el('div', { class: 'card-foot' },
+    el('button', { class: 'btn primary', text: 'Posted', onclick: posted }),
+    el('button', { class: 'btn', text: '↻ Retry with Claude', onclick: () => retryDraft(it) }),
     el('button', { class: 'btn', text: 'Save now', onclick: async (e) => {
       const done = busy(e.target, '…');
       sent.dataset.dirty = '1';
@@ -427,6 +495,34 @@ function draftCard(it) {
       done();
     } })));
   return card;
+}
+
+/* -- Ready: one post at a time, like the LinkedIn lists -- */
+const rp = { view: LS.get('rp_view', 'focus'), focus: LS.get('rp_focus', '') || null, idx: 0 };
+function renderReady(ready, emptyText) {
+  const box = $('readyList');
+  if (!ready.length) { box.replaceChildren(el('div', { class: 'empty', text: emptyText })); setDmActions(null); return; }
+  const toggle = el('div', { class: 'view-row' }, el('div', { class: 'mini-seg' },
+    ...[['focus', 'One by one'], ['list', 'List (' + ready.length + ')']].map(([v, label]) =>
+      el('button', { class: rp.view === v ? 'on' : '', text: label, onclick: () => {
+        rp.view = v; LS.set('rp_view', v); renderReplies(); window.scrollTo(0, 0); } }))));
+  if (rp.view === 'list') { box.replaceChildren(toggle, ...ready.map((it) => draftCard(it))); setDmActions(null); return; }
+  let i = ready.findIndex((it) => it.id === rp.focus);
+  if (i < 0) i = Math.min(rp.idx, ready.length - 1);
+  const it = ready[i];
+  rp.focus = it.id; rp.idx = i; LS.set('rp_focus', it.id);
+  const go = (k) => { rp.focus = ready[k].id; renderReplies(); window.scrollTo(0, 0); };
+  const card = draftCard(it, { focus: true });
+  card.prepend(el('div', { class: 'focus-top' }, el('span', { class: 'focus-count', text: (i + 1) + ' of ' + ready.length })));
+  card.append(el('div', { class: 'focus-nav' },
+    el('button', { class: 'link', text: '‹ Previous', disabled: i === 0, onclick: () => go(i - 1) }),
+    el('button', { class: 'link', text: 'Later ›', title: 'Leave this one for later and show the next', onclick: () => go((i + 1) % ready.length) })));
+  const next = ready.slice(i + 1, i + 4);
+  const up = next.length ? el('div', { class: 'up-next' }, el('div', { class: 'tier-head', text: 'Up next' }),
+    ...next.map((n) => el('button', { class: 'next-row', onclick: () => go(ready.indexOf(n)) },
+      el('b', { text: '@' + handleOf(n.author) }), el('span', { class: 'muted', text: ' ' + postText(n).slice(0, 60) })))) : null;
+  box.replaceChildren(toggle, card, ...(up ? [up] : []));
+  setDmActions(state.seg === 'ready' ? card.actions : null);
 }
 
 function waitingCard(it) {
@@ -471,7 +567,7 @@ function renderReplies() {
     const box = $(id);
     box.replaceChildren(...(list.length ? list.map(fn) : [el('div', { class: 'empty', text: emptyText })]));
   };
-  fill('readyList', ready, draftCard, job && ACTIVE.includes(job.status) ? 'Drafts will show up here in a few minutes.' : 'No drafts yet. Share a post from X, or run Scout.');
+  renderReady(ready, job && ACTIVE.includes(job.status) ? 'Drafts will show up here in a few minutes.' : 'No drafts yet. Share a post from X, or run Scout.');
   fill('waitingList', waiting, waitingCard, 'Nothing waiting.');
   fill('doneList', done, doneRow, 'Nothing here yet.');
 }
@@ -1599,7 +1695,7 @@ function tierRank(t) { return TIER_RANK[t] ?? 3; }
 
 function setDmActions(nodes) {
   const bar = $('dmActions');
-  const show = nodes && nodes.length && currentTab() === 'linkedin';
+  const show = nodes && nodes.length && ['linkedin', 'replies'].includes(currentTab());
   bar.hidden = !show;
   bar.replaceChildren(...(show ? nodes : []));
   document.body.classList.toggle('with-actionbar', !!show);
