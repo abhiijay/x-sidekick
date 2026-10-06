@@ -497,6 +497,43 @@ function draftCard(it, opts = {}) {
   return card;
 }
 
+/* Batch fix: when a whole batch went wrong (wrong prompt, AI language, false
+ * facts), one note redoes all of it and stays as a rule for every later run. */
+function batchFixSheet(title, note, placeholder, go, label) {
+  const box = el('textarea', { class: 'tell-box', rows: 4, placeholder });
+  sheetCustom(title, [
+    el('div', { class: 'sheet-note', text: note }), box,
+    el('button', { class: 'primary', text: label, onclick: async (e) => {
+      const text = box.value.trim();
+      if (!text) { toast('Say what is wrong with the batch', true); box.focus(); return; }
+      e.target.disabled = true;
+      try { await go(text); } catch (err) { toast(err.message + '. Your note is saved as a rule.', true); }
+      closeSheet();
+      refresh();
+    } })]);
+  setTimeout(() => box.focus(), 50);
+}
+function redoAllReplies(ready) {
+  batchFixSheet('Redo all ' + ready.length + ' replies with Claude',
+    'Every draft on Ready is dropped and rewritten. Your note becomes a rule for every reply Claude writes from now on.',
+    'What is wrong with this batch? e.g. "Reads like AI, did not use the voice profiles. Shorter, no em dashes."',
+    async (note) => {
+      const r = await api('/api/draft/retry-all', { note, account: LS.get('account', 'abhiijayVinayak') });
+      toast(r.job && r.job.status === 'failed' ? (r.job.error || 'Claude run failed') + '. Your note is saved.'
+        : 'Claude is redrafting ' + r.redone + '. They come back to Ready in a few minutes.', r.job && r.job.status === 'failed');
+    }, '↻ Redo all ' + ready.length);
+}
+function fixAllMessages(n) {
+  const camp = dm.camp.linkedin || '';
+  batchFixSheet('Fix all ' + n + ' messages with Claude',
+    'Every written message in To send' + (camp ? ' (this campaign)' : '') + ' is rewritten with your note. The note becomes a rule for every message Claude writes from now on.',
+    'What is wrong? e.g. "Says we worked with brands we never did. Remove that, and no AI phrases like \'I came across\'."',
+    async (text) => {
+      const r = await api('/api/dm/feedback-all', { text, channel: 'linkedin', campaign: camp || null });
+      toast('Claude is rewriting ' + r.fixing + '. They come back to To send in a few minutes.');
+    }, '✎ Rewrite all ' + n);
+}
+
 /* -- Ready: one post at a time, like the LinkedIn lists -- */
 const rp = { view: LS.get('rp_view', 'focus'), focus: LS.get('rp_focus', '') || null, idx: 0 };
 function renderReady(ready, emptyText) {
@@ -505,7 +542,9 @@ function renderReady(ready, emptyText) {
   const toggle = el('div', { class: 'view-row' }, el('div', { class: 'mini-seg' },
     ...[['focus', 'One by one'], ['list', 'List (' + ready.length + ')']].map(([v, label]) =>
       el('button', { class: rp.view === v ? 'on' : '', text: label, onclick: () => {
-        rp.view = v; LS.set('rp_view', v); renderReplies(); window.scrollTo(0, 0); } }))));
+        rp.view = v; LS.set('rp_view', v); renderReplies(); window.scrollTo(0, 0); } }))),
+    el('span', { class: 'spacer' }),
+    el('button', { class: 'pill-chip', text: '↻ Redo all', title: 'The whole batch is wrong: redraft all with a note', onclick: () => redoAllReplies(ready) }));
   if (rp.view === 'list') { box.replaceChildren(toggle, ...ready.map((it) => draftCard(it))); setDmActions(null); return; }
   let i = ready.findIndex((it) => it.id === rp.focus);
   if (i < 0) i = Math.min(rp.idx, ready.length - 1);
@@ -2204,7 +2243,9 @@ function renderLinkedIn(root) {
   const which = dm.seg[ch];
   if (which === 'send') {
     if (needs.length) nodes.push(needsBanner(needs));
-    nodes.push(el('div', { class: 'view-row' }, viewToggle('message', writable.length), el('span', { class: 'spacer' }), campFilterChip(camps)));
+    nodes.push(el('div', { class: 'view-row' }, viewToggle('message', writable.length), el('span', { class: 'spacer' }),
+      writable.length ? el('button', { class: 'pill-chip', text: '✎ Fix all', title: 'The whole batch is wrong: rewrite all with a note', onclick: () => fixAllMessages(writable.filter((l) => l.variants && l.variants.length).length) }) : null,
+      campFilterChip(camps)));
     if (li.view.message === 'list') messageList(writable, nodes); else messageFocus(writable, nodes);
   } else {
     setDmActions(null);

@@ -221,8 +221,10 @@ Pick 5 approved lines that are closest to each post and imitate their **shape**.
    say "when I was 17". A fact being true and being on-voice are different tests;
    lifting an age, a number or a job title out of the post and echoing it back is
    the tell, not the fact. At most one draft per batch may use it.
-5c. **Never repeat a rejected draft.** Read `{SIDEKICK_DATA_DIR}/rejected-drafts.json`
-   if the payload exposes it, and treat each entry's `reason` as a standing rule.
+5c. **Never repeat a rejected draft.** The payload carries `rejected` (his
+   newest thrown-away drafts, each with `text` and `reason`) and `feedback` (his
+   "Redo all" notes about whole batches, newest first). Treat every reason and
+   every feedback note as a standing rule; a newer note beats an older one.
    These are drafts he threw away by hand; producing the same shape again wastes
    the one thing the reject button is for.
 6. **Opus judge.** A separate `model: "opus"` subagent scores every draft 1-10 on

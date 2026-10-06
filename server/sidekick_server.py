@@ -434,6 +434,58 @@ def reject_draft(body):
     return 200, {"ok": True, "left": len(drafts)}
 
 
+REPLY_FEEDBACK_FILE = os.path.join(DATA_DIR, "reply-feedback.json")
+REPLY_FEEDBACK_SENT = 30     # newest batch notes sent to each draft run
+REJECTS_SENT = 40            # newest rejected drafts sent to each draft run
+
+
+def _retire_drafts(it, note, rejects):
+    """Drops a post's drafts (kept as rejected examples) and queues it to redraft."""
+    old = it.get("drafts") or []
+    for d in old:
+        rejects.insert(0, {"ts": now_str(),
+                           "post": (it.get("tweet_text") or it.get("text") or "")[:600],
+                           "author": it.get("author"),
+                           "url": it.get("tweet_url") or it.get("url"),
+                           "text": d.get("text", ""), "angle": d.get("angle", ""),
+                           "reason": note or "redo asked, no reason given"})
+    if old:
+        it["previous_drafts"] = [d.get("text", "") for d in old][:6]
+    it["retry_note"] = note
+    it["drafts"] = []
+    it["status"] = "queued"
+    # Nothing went out for this post yet, so a pre-filled "what you sent" goes too.
+    for k in ("chosen_index", "drafted_ts", "posted_text", "sent_verbatim"):
+        it.pop(k, None)
+
+
+def draft_retry_all(body):
+    """"Redo all with Claude": the whole Ready batch was written wrong.
+
+    The note is kept in reply-feedback.json as a standing rule that every
+    future draft run reads, then every drafted post (or `ids`) is redrafted.
+    """
+    note = str(body.get("note") or "").strip()[:1000]
+    ids = set(body.get("ids") or []) if isinstance(body.get("ids"), list) else None
+    with LOCK:
+        if note:
+            notes = _load(REPLY_FEEDBACK_FILE, "notes")
+            notes.insert(0, {"ts": now_str(), "text": note})
+            _save(REPLY_FEEDBACK_FILE, notes[:2000], "notes")
+        items = load_queue()
+        todo = [i for i in items if i.get("status") == "drafted" and (not ids or i.get("id") in ids)]
+        if not todo:
+            return 400, {"error": "no drafted posts to redo"}
+        rejects = _load(REJECTS_FILE, "rejects")
+        for it in todo:
+            _retire_drafts(it, note, rejects)
+        _save(REJECTS_FILE, rejects[:REJECTS_KEEP], "rejects")
+        save_queue(items)
+    code, res = start_draft_job([i["id"] for i in todo], body.get("account"), note)
+    res["redone"] = len(todo)
+    return code, res
+
+
 def draft_retry(body):
     """"Retry with Claude" on one post: redraft it, with his note on what to change.
 
@@ -451,24 +503,9 @@ def draft_retry(body):
             return 404, {"error": "id not found"}
         if it.get("status") not in ("drafted", "queued"):
             return 400, {"error": "only a post waiting for a reply can be redrafted"}
-        old = it.get("drafts") or []
-        if old:
-            rejects = _load(REJECTS_FILE, "rejects")
-            for d in old:
-                rejects.insert(0, {"ts": now_str(),
-                                   "post": (it.get("tweet_text") or it.get("text") or "")[:600],
-                                   "author": it.get("author"),
-                                   "url": it.get("tweet_url") or it.get("url"),
-                                   "text": d.get("text", ""), "angle": d.get("angle", ""),
-                                   "reason": note or "redo asked, no reason given"})
-            _save(REJECTS_FILE, rejects[:REJECTS_KEEP], "rejects")
-            it["previous_drafts"] = [d.get("text", "") for d in old][:6]
-        it["retry_note"] = note
-        it["drafts"] = []
-        it["status"] = "queued"
-        # Nothing went out for this post yet, so a pre-filled "what you sent" goes too.
-        for k in ("chosen_index", "drafted_ts", "posted_text", "sent_verbatim"):
-            it.pop(k, None)
+        rejects = _load(REJECTS_FILE, "rejects")
+        _retire_drafts(it, note, rejects)
+        _save(REJECTS_FILE, rejects[:REJECTS_KEEP], "rejects")
         save_queue(items)
     return start_draft_job([item_id], body.get("account"), note)
 
@@ -921,6 +958,42 @@ def accept_status():
     aw = (load_dm_state().get("accept_watch") or {})
     return {"on": accept_configured(), "every_min": LI_ACCEPT_EVERY_MIN,
             **{k: aw.get(k) for k in ("last_ts", "last_found", "last_replies", "error", "last_moved")}}
+
+
+def dm_feedback_all(body):
+    """"Fix all with Claude": every written message waiting to send was wrong.
+
+    The note becomes a standing rule (dm-feedback.json), and each ready message
+    lead with written text goes back for a rewrite carrying the note and its
+    current text, then one write run covers them.
+    """
+    text = str(body.get("text") or "").strip()[:1000]
+    if not text:
+        return 400, {"error": "say what is wrong with these messages"}
+    ch = body.get("channel") or "linkedin"
+    camp = body.get("campaign") or None
+    with LOCK:
+        leads = load_dm_leads()
+        todo = [l for l in leads if l.get("channel") == ch and lead_kind(l) == "message"
+                and l.get("status") == "ready" and not l.get("needs_message") and l.get("variants")
+                and (not camp or l.get("campaign") == camp)]
+        if not todo:
+            return 400, {"error": "no written messages waiting to send"}
+        notes = load_dm_feedback()
+        notes.insert(0, {"ts": now_str(), "text": text, "channel": ch, "campaign": camp,
+                         "lead": "whole batch (%d)" % len(todo)})
+        _save(DM_FEEDBACK_FILE, notes[:DM_FEEDBACK_KEEP], "notes")
+        for l in todo:
+            v = l["variants"][(l.get("variant_index") or 0) % len(l["variants"])]
+            l["previous_text"] = (l.get("draft_text") if isinstance(l.get("draft_text"), str) else v.get("text", ""))[:DM_TEXT_MAX]
+            l["fix_note"] = text
+            l["needs_message"] = True
+            l.pop("draft_text", None)
+            l["updated_ts"] = now_str()
+        save_dm_leads(leads)
+    code, res = start_write_job({"ids": [l["id"] for l in todo]})
+    res["fixing"] = len(todo)
+    return code, res
 
 
 def load_dm_campaigns():
@@ -2045,6 +2118,13 @@ def agent_job_payload(job):
                 # Only the authors in this batch, so this cannot grow over time.
                 "people": people_for(i.get("author") for i in items),
                 "blocked_authors": sorted(blocked_set()),
+                # His "Redo all" notes (standing rules) and the drafts he threw away
+                # with why. ROUTINE.md always said to read these; until 2026-10-06
+                # the payload never carried them, so no run ever saw a reason.
+                "feedback": [{k: n.get(k) for k in ("ts", "text")}
+                             for n in _load(REPLY_FEEDBACK_FILE, "notes")[:REPLY_FEEDBACK_SENT]],
+                "rejected": [{k: r.get(k) for k in ("text", "reason", "angle") if r.get(k)}
+                             for r in _load(REJECTS_FILE, "rejects")[:REJECTS_SENT]],
                 "write_to": "/agent/job/%s/drafts" % job["id"]}
     if job["kind"] == "dmwrite":
         return dm_payload_for_write(job)
@@ -2533,6 +2613,8 @@ class AppHandler(BaseHandler):
                 return self._json(*find_add_unchecked(body))
             if path == "/api/dm/write":
                 return self._json(*start_write_job(body))
+            if path == "/api/dm/feedback-all":
+                return self._json(*dm_feedback_all(body))
             if path == "/api/dm/feedback":
                 return self._json(*dm_feedback(body))
             if path == "/api/dm/accept-check":
@@ -2547,6 +2629,8 @@ class AppHandler(BaseHandler):
                 return self._json(*scout_pick(body))
             if path == "/api/sends/add":
                 return self._json(*add_send(body))
+            if path == "/api/draft/retry-all":
+                return self._json(*draft_retry_all(body))
             if path == "/api/draft/retry":
                 return self._json(*draft_retry(body))
             if path == "/api/draft/reject":
