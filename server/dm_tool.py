@@ -36,6 +36,8 @@ One lead:
   fields       {"n": first name, "p": product, "plat": where found, "q": buyer query, "cat": category}
   note         anything the sender should know
   attachments  [{"label": "Report PDF", "file": "Name.pdf"}]  files in <data dir>/attachments/ to send with the message
+               or [{"label": "Report page", "url": "https://..."}] for a link
+  variant_index  which of the variants shows first (0-based); set it at random to spread a test across versions
   kind         "message" (default) or "connect" (LinkedIn: a profile to send a connection request to)
   needs_message  true = no message yet; "Write with Claude" on the phone drafts one
   context      facts for the writer (what they do, how we can help, prior contact)
@@ -59,7 +61,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CHANNELS = ("linkedin", "x")
 STATUSES = ("ready", "sent", "replied", "skipped", "cant_dm", "requested")
 CONTENT_FIELDS = ("campaign", "batch", "n", "name", "handle", "recipient_id", "profile_url",
-                  "product", "followers", "meta", "flag", "drop", "variants", "library", "attachments",
+                  "product", "followers", "meta", "flag", "drop", "variants", "library", "attachments", "variant_index",
                   "fields", "note", "kind", "headline", "site", "tagline", "tier", "score",
                   "icp", "context", "needs_message", "source", "launch")
 # Carried over only when a lead is first added (history from before the app).

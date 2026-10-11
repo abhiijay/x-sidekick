@@ -385,3 +385,5 @@ body.with-actionbar { padding-bottom: calc(var(--tabbar) + 84px + env(safe-area-
   .overlay { align-items: center; justify-content: center; }
   .overlay > * { max-width: 560px; width: 100%; border-radius: var(--radius); }
 }
+
+a.chip { text-decoration: none; display: inline-flex; align-items: center; }

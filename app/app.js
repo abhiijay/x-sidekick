@@ -2170,6 +2170,14 @@ function attachmentChips(l) {
   };
   const row = el('div', { class: 'var-chips' });
   for (const a of l.attachments) {
+    if (a.url) {
+      // A link (e.g. the report as a web page): open it, or copy it into the message.
+      const go = el('a', { class: 'chip', href: a.url, target: '_blank', rel: 'noopener', text: '🔗 Open ' + (a.label || 'link') });
+      const cp = el('button', { class: 'chip', text: '⧉ Copy link', title: a.url });
+      cp.onclick = async () => { try { await navigator.clipboard.writeText(a.url); toast('Link copied'); } catch { toast('Could not copy. ' + a.url, true); } };
+      row.append(go, cp);
+      continue;
+    }
     const open = el('button', { class: 'chip', text: '📄 Open ' + (a.label || 'file'), title: 'Open ' + a.file });
     open.onclick = () => view(a, open);
     const dl = el('button', { class: 'chip', text: '📎 Save ' + (a.label || 'file'), title: 'Save ' + a.file + ' to attach in LinkedIn' });
