@@ -167,6 +167,20 @@ function ago(ts) {
   return Math.round(m / 1440) + 'd';
 }
 
+/* Shown only on a server that syncs with another device (SIDEKICK_PEER_URL).
+ * Says whether what is on screen matches the other device. */
+function syncChip(p) {
+  const c = $('syncChip');
+  if (!p || !p.on) { c.hidden = true; return; }
+  c.hidden = false;
+  const waiting = p.error && p.last_ok ? ' Last synced ' + agoText(p.last_ok) + '.' : '';
+  c.className = 'sync-chip ' + (p.error ? 'off' : 'ok');
+  c.textContent = p.error ? 'Not synced' : p.behind ? 'Syncing ' + p.behind : 'Synced';
+  c.title = p.error ? p.error + '.' + waiting + ' Your taps are kept and sent when it is back.'
+    : 'Same data as your other device, checked ' + agoText(p.last_ok);
+  c.onclick = () => toast(c.title, !!p.error);
+}
+
 function agoText(ts) {
   const a = ago(ts);
   return a === 'now' ? 'just now' : a ? a + ' ago' : '';
@@ -262,8 +276,10 @@ async function refresh() {
     $('dot').title = local.on ? 'connected directly (server on this phone)' : 'connected';
     state.acceptWatch = h.accept_watch || null;
     if (h.sends != null) $('sendsCount').textContent = 'Replies Claude learns from: ' + h.sends;
+    syncChip(h.peer);
     const warn = [];
-    if (!h.routine) warn.push('Claude routine is not connected, so drafting is off.');
+    // A server that syncs with another device leaves Claude's jobs to that one.
+    if (!h.routine) warn.push(h.peer && h.peer.on ? 'Find more and Write with Claude run on your other device. What they produce shows up here by itself.' : 'Claude routine is not connected, so drafting is off.');
     if (!h.armory) warn.push('Armory is not connected, so scouting is off.');
     banner(warn.join(' '));
     if (ch(q) || ch(j)) {

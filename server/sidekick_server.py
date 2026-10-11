@@ -95,6 +95,17 @@ LI_ACCEPT_EVERY_MIN = max(5, int(env("LI_ACCEPT_EVERY_MIN", "10") or 10))
 # so a run covers everyone accepted since the last one instead of one run each.
 LI_ACCEPT_WRITE_EVERY_MIN = max(10, int(env("LI_ACCEPT_WRITE_EVERY_MIN", "120") or 120))
 
+# Two-device sync. The server that cannot be reached from outside (the Mac)
+# names the one that can (the phone, behind ngrok) as its peer and does all the
+# calling: it pulls what changed there and pushes what changed here.
+PEER_URL = env("SIDEKICK_PEER_URL").rstrip("/")
+PEER_PASSWORD = env("SIDEKICK_PEER_PASSWORD") or APP_PASSWORD
+PEER_EVERY_S = max(10, int(env("SIDEKICK_PEER_EVERY_S", "40") or 40))
+if PEER_URL and PEER_URL == PUBLIC_URL:
+    # The public URL belongs to the peer, so Claude's callbacks would land there
+    # and not here. Find more and Write with Claude stay on the peer.
+    PUBLIC_URL = ""
+
 JOB_TOKEN_TTL = 3 * 3600
 SCOUT_WINDOW_HOURS = 24
 SCOUT_CHUNK = 10
@@ -1142,6 +1153,7 @@ def dm_update(body):
         elif new in ("ready", "skipped", "cant_dm") and prev in ("sent", "replied"):
             forget_dm_send(lid)
         stats = dm_stats(leads, load_dm_state())
+    PEER_WAKE.set()
     return 200, {"ok": True, "lead": lead, "stats": stats}
 
 
@@ -1483,6 +1495,275 @@ def dm_cooldown_clear(body):
 
 
 # ---------------------------------------------------------------- Armory
+
+# ---------------------------------------------------------------- peer sync
+
+# One person works from two devices, each running this server on its own data
+# folder. Leads are merged per person: the copy that was touched last wins.
+# Nothing is ever deleted by a sync, and it never sends or marks anything sent
+# on its own; it only carries what was tapped on one device to the other.
+LEAD_TS_FIELDS = ("updated_ts", "added_ts", "sent_ts", "requested_ts", "accepted_ts",
+                  "reply_ts", "written_ts")
+SYNC_CHUNK = 12              # leads per call; small so a weak phone link gets them through
+SYNC_TOUCHED_PAGE = 500
+SYNC_ID_RE = re.compile(r"^[A-Za-z0-9_.:\-]{1,80}$")
+SYNC_DOCS = {"campaigns": (DM_CAMPAIGNS_FILE, "campaigns"), "libraries": (DM_LIBS_FILE, "libraries")}
+PEER_WAKE = threading.Event()
+PEER_STATUS = {"on": bool(PEER_URL), "last_ok": None, "last_try": None, "error": None,
+               "pulled": 0, "pushed": 0, "behind": 0}
+
+
+def lead_version(lead):
+    return max(str(lead.get(k) or "") for k in LEAD_TS_FIELDS)
+
+
+def touched_flat():
+    t = _load(DM_TOUCHED_FILE, "touched")
+    if not isinstance(t, dict):
+        return []
+    out = set()
+    for pre, key in (("li:", "linkedin"), ("x:", "x"), ("n:", "names")):
+        out.update(pre + str(v) for v in t.get(key) or [] if v)
+    return sorted(out)
+
+
+def touched_merge(keys):
+    """Add contacted people from the other device. Returns how many were new."""
+    names = {"li": "linkedin", "x": "x", "n": "names"}
+    with LOCK:
+        t = _load(DM_TOUCHED_FILE, "touched")
+        t = t if isinstance(t, dict) else {}
+        have = {k: set(t.get(v) or []) for k, v in names.items()}
+        added = 0
+        for key in keys or []:
+            pre, _, val = str(key).partition(":")
+            if pre in names and val and len(val) <= 200 and val not in have[pre]:
+                have[pre].add(val)
+                t.setdefault(names[pre], []).append(val)
+                added += 1
+        if added:
+            _save(DM_TOUCHED_FILE, t, "touched")
+    return added
+
+
+def doc_stamp(name):
+    path = SYNC_DOCS[name][0]
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return str((json.load(f) or {}).get("updated") or "")
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
+def doc_put(name, stamp, data):
+    """Take the other device's campaign rules or line libraries when newer."""
+    if name not in SYNC_DOCS or not isinstance(data, dict) or not stamp:
+        return False
+    path, key = SYNC_DOCS[name]
+    with LOCK:
+        if str(stamp) <= doc_stamp(name):
+            return False
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"updated": str(stamp), key: data}, f, indent=1, ensure_ascii=False)
+        os.replace(tmp, path)
+    return True
+
+
+def feedback_merge(notes):
+    with LOCK:
+        mine = load_dm_feedback()
+        seen = {(n.get("ts"), n.get("text")) for n in mine}
+        new = [n for n in notes or [] if isinstance(n, dict) and n.get("text")
+               and (n.get("ts"), n.get("text")) not in seen]
+        if new:
+            mine = sorted(mine + new, key=lambda n: str(n.get("ts") or ""), reverse=True)
+            _save(DM_FEEDBACK_FILE, mine[:DM_FEEDBACK_KEEP], "notes")
+    return len(new)
+
+
+def sync_digest():
+    with LOCK:
+        leads = {l["id"]: lead_version(l) for l in load_dm_leads()
+                 if l.get("id") and not l.get("sync_partial")}
+        flat = touched_flat()
+        return {"leads": leads,
+                "docs": {name: doc_stamp(name) for name in SYNC_DOCS},
+                "touched": {"n": len(flat), "sha": hashlib.sha1("\n".join(flat).encode("utf-8")).hexdigest()[:16]},
+                "feedback": len(load_dm_feedback())}
+
+
+def sync_get(body):
+    ids = [i for i in (body.get("ids") or []) if isinstance(i, str)][:50]
+    with LOCK:
+        want = set(ids)
+        return 200, {"leads": [l for l in load_dm_leads() if l.get("id") in want]}
+
+
+def sync_merge(incoming):
+    """Merge leads from the other device. Returns the ids that changed here.
+
+    A lead is replaced only by a copy touched later. `sync_partial` marks a copy
+    that came without the writer's `context`; a full copy always replaces it,
+    and it never wipes a context this side already has.
+    """
+    changed = []
+    with LOCK:
+        leads = load_dm_leads()
+        at = {l.get("id"): i for i, l in enumerate(leads)}
+        for inc in incoming or []:
+            if not isinstance(inc, dict) or not SYNC_ID_RE.match(str(inc.get("id") or "")):
+                continue
+            if inc.get("channel") not in DM_CHANNELS or inc.get("status") not in DM_STATUSES:
+                continue
+            inc = {k: v for k, v in inc.items() if k not in ("claude_url", "writing_job")}
+            partial = bool(inc.pop("sync_partial", False))
+            i = at.get(inc["id"])
+            if i is None:
+                if partial:
+                    inc["sync_partial"] = True
+                at[inc["id"]] = len(leads)
+                leads.append(inc)
+                changed.append(inc)
+                continue
+            cur = leads[i]
+            newer = lead_version(inc) > lead_version(cur)
+            fills = cur.get("sync_partial") and not partial and lead_version(inc) >= lead_version(cur)
+            if cur.get("sync_partial") and not partial and not (newer or fills):
+                # Touched here since the short copy arrived: keep this side's
+                # state, take only what the short copy was missing.
+                cur.pop("sync_partial", None)
+                if inc.get("context") is not None:
+                    cur["context"] = inc["context"]
+                changed.append(cur)
+                continue
+            if not (newer or fills):
+                continue
+            if partial:
+                if cur.get("context") is not None:
+                    inc["context"] = cur["context"]
+                if cur.get("sync_partial"):
+                    inc["sync_partial"] = True
+            leads[i] = inc
+            changed.append(inc)
+        if changed:
+            save_dm_leads(leads)
+            for lead in changed:
+                # dm-sends.json is derived from the lead, so it follows the merge.
+                if lead.get("status") in ("sent", "replied") and (lead.get("sent_text") or "").strip():
+                    record_dm_send(lead)
+                else:
+                    forget_dm_send(lead["id"])
+    return [l["id"] for l in changed]
+
+
+def sync_put(body):
+    out = {"ok": True, "leads": len(sync_merge(body.get("leads")))}
+    if isinstance(body.get("touched"), list):
+        out["touched"] = touched_merge(body["touched"])
+    for name, doc in (body.get("docs") or {}).items():
+        if isinstance(doc, dict):
+            out.setdefault("docs", {})[name] = doc_put(name, doc.get("updated"), doc.get("data"))
+    if isinstance(body.get("feedback"), list):
+        out["feedback"] = feedback_merge(body["feedback"])
+    return 200, out
+
+
+def peer_call(path, body=None, timeout=30, tries=3):
+    data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+    last = None
+    for attempt in range(tries):
+        req = urllib.request.Request(PEER_URL + path, data=data, method="POST" if data else "GET", headers={
+            "X-Sidekick-Key": PEER_PASSWORD, "ngrok-skip-browser-warning": "1",
+            "Accept-Encoding": "gzip", "Content-Type": "application/json", "User-Agent": "sidekick-sync"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read()
+                if resp.headers.get("Content-Encoding") == "gzip":
+                    raw = gzip.decompress(raw)
+                return json.loads(raw.decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                raise RuntimeError("the other device refused the password")
+            if e.code == 404:
+                page = e.read(3000).decode("utf-8", "replace")
+                if "ngrok" in page.lower():
+                    last = RuntimeError("the other device is offline")
+                else:
+                    raise RuntimeError("the other device runs an older server: run `sidekick` there to update it")
+            else:
+                last = RuntimeError("the other device answered %d" % e.code)
+        except Exception as e:  # dropped link, timeout, cut-off body: try again
+            last = RuntimeError("could not reach the other device (%s)" % type(e).__name__)
+        time.sleep(2 + 3 * attempt)
+    raise last
+
+
+def peer_sync_once():
+    theirs = peer_call("/api/sync/digest")
+    mine = sync_digest()
+    with LOCK:
+        partial = {l["id"] for l in load_dm_leads() if l.get("sync_partial")}
+    tl, ml = theirs.get("leads") or {}, mine["leads"]
+    need = [i for i, v in tl.items() if i in partial or v > ml.get(i, "")]
+    give = [i for i, v in ml.items() if v > tl.get(i, "")]
+    PEER_STATUS["behind"] = len(need) + len(give)
+    pulled = pushed = 0
+    for n in range(0, len(need), SYNC_CHUNK):
+        got = peer_call("/api/sync/get", {"ids": need[n:n + SYNC_CHUNK]})
+        pulled += len(sync_merge(got.get("leads")))
+        PEER_STATUS["behind"] = max(0, PEER_STATUS["behind"] - SYNC_CHUNK)
+    for n in range(0, len(give), SYNC_CHUNK):
+        _, mine_now = sync_get({"ids": give[n:n + SYNC_CHUNK]})
+        pushed += int(peer_call("/api/sync/put", {"leads": mine_now["leads"]}).get("leads") or 0)
+        PEER_STATUS["behind"] = max(0, PEER_STATUS["behind"] - SYNC_CHUNK)
+
+    for name in SYNC_DOCS:                       # campaign rules, line libraries
+        a, b = mine["docs"].get(name, ""), (theirs.get("docs") or {}).get(name, "")
+        if b > a:
+            doc = peer_call("/api/sync/doc?name=" + name)
+            doc_put(name, doc.get("updated"), doc.get("data"))
+        elif a > b:
+            peer_call("/api/sync/put", {"docs": {name: {"updated": a, "data": _load(*SYNC_DOCS[name])}}})
+
+    if (theirs.get("touched") or {}).get("sha") != mine["touched"]["sha"]:
+        far, off = [], 0
+        while True:
+            page = peer_call("/api/sync/touched?offset=%d&limit=%d" % (off, SYNC_TOUCHED_PAGE))
+            far.extend(page.get("keys") or [])
+            off += SYNC_TOUCHED_PAGE
+            if off >= int(page.get("total") or 0):
+                break
+        near = touched_flat()
+        touched_merge(far)
+        only_here = sorted(set(near) - set(far))
+        for n in range(0, len(only_here), SYNC_TOUCHED_PAGE):
+            peer_call("/api/sync/put", {"touched": only_here[n:n + SYNC_TOUCHED_PAGE]})
+
+    if theirs.get("feedback") != mine["feedback"]:
+        feedback_merge(peer_call("/api/sync/doc?name=feedback").get("data"))
+        peer_call("/api/sync/put", {"feedback": load_dm_feedback()[:200]})
+    return pulled, pushed
+
+
+def peer_loop():
+    while True:
+        PEER_STATUS["last_try"] = now_str()
+        try:
+            pulled, pushed = peer_sync_once()
+            PEER_STATUS.update(last_ok=now_str(), error=None, behind=0,
+                               pulled=PEER_STATUS["pulled"] + pulled, pushed=PEER_STATUS["pushed"] + pushed)
+            if pulled or pushed:
+                log("sync: %d from the other device, %d to it" % (pulled, pushed))
+        except Exception as e:
+            if str(e) != PEER_STATUS["error"]:
+                log("sync: %s" % e)
+            PEER_STATUS["error"] = str(e)[:200]
+        PEER_WAKE.wait(PEER_EVERY_S)
+        if PEER_WAKE.is_set():
+            time.sleep(2)            # let a burst of taps land in one round
+            PEER_WAKE.clear()
+
 
 class ArmoryError(Exception):
     pass
@@ -2537,8 +2818,24 @@ class AppHandler(BaseHandler):
                              dm=True, dm_ready={ch: dm[ch]["ready"] for ch in DM_CHANNELS},
                              # Here, not in /api/dm: its clock ticks every check, and
                              # that would defeat the 304s on the big DM list.
-                             accept_watch=accept_status())
+                             accept_watch=accept_status(), peer=dict(PEER_STATUS))
                     return self._json(200, h)
+                if path == "/api/sync/digest":
+                    return self._json(200, sync_digest())
+                if path == "/api/sync/touched":
+                    qs = parse_qs(urlparse(self.path).query)
+                    off = clamp_int((qs.get("offset") or ["0"])[0], 0, 10 ** 7, 0)
+                    lim = clamp_int((qs.get("limit") or ["500"])[0], 1, 1000, 500)
+                    flat = touched_flat()
+                    return self._json(200, {"total": len(flat), "keys": flat[off:off + lim]})
+                if path == "/api/sync/doc":
+                    name = (parse_qs(urlparse(self.path).query).get("name") or [""])[0]
+                    if name == "feedback":
+                        return self._json(200, {"data": load_dm_feedback()[:200]})
+                    if name not in SYNC_DOCS:
+                        return self._json(404, {"error": "unknown doc"})
+                    with LOCK:
+                        return self._json(200, {"updated": doc_stamp(name), "data": _load(*SYNC_DOCS[name])})
                 if path == "/api/dm":
                     with LOCK:
                         return self._json(200, dm_view())
@@ -2600,6 +2897,10 @@ class AppHandler(BaseHandler):
                 return self._json(*dm_update(body))
             if path == "/api/dm/failed":
                 return self._json(*dm_failed(body))
+            if path == "/api/sync/get":
+                return self._json(*sync_get(body))
+            if path == "/api/sync/put":
+                return self._json(*sync_put(body))
             if path == "/api/dm/cooldown/clear":
                 return self._json(*dm_cooldown_clear(body))
             if path == "/api/draft":
@@ -2761,6 +3062,9 @@ def main():
         log("LinkedIn accepts: checking %s every %d min" % (LI_ACCEPT_EMAIL, LI_ACCEPT_EVERY_MIN))
     else:
         log("LinkedIn accepts: off (set LI_ACCEPT_EMAIL + LI_ACCEPT_APP_PASSWORD in .env)")
+    if PEER_URL:
+        threading.Thread(target=peer_loop, daemon=True).start()
+        log("sync: with %s every %ds" % (urlparse(PEER_URL).netloc, PEER_EVERY_S))
     try:
         while True:
             time.sleep(3600)
