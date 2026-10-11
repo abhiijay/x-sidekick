@@ -77,6 +77,9 @@ APP_PORT = int(env("SIDEKICK_APP_PORT", "7790"))
 LEGACY_PORT = int(env("SIDEKICK_LEGACY_PORT", "7781"))  # 0 disables
 PUBLIC_URL = env("SIDEKICK_PUBLIC_URL").rstrip("/")
 DATA_DIR = env("SIDEKICK_DATA_DIR") or os.path.join(HERE, "data")
+# Files a lead carries (report PDFs). Put there by Cowork; the app only reads them.
+ATTACH_DIR = os.path.join(DATA_DIR, "attachments")
+ATTACH_TYPES = {".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
 EXTRA_ORIGINS = tuple(o.strip().rstrip("/") for o in env("SIDEKICK_ALLOWED_ORIGINS").split(",") if o.strip())
 
 ARMORY_URL = env("ARMORY_URL").rstrip("/")
@@ -2943,6 +2946,23 @@ class AppHandler(BaseHandler):
                         return self._json(404, {"error": "unknown doc"})
                     with LOCK:
                         return self._json(200, {"updated": doc_stamp(name), "data": _load(*SYNC_DOCS[name])})
+                if path == "/api/dm/attachment":
+                    # A file a lead carries (e.g. the report PDF to send with the message).
+                    name = os.path.basename((parse_qs(urlparse(self.path).query).get("file") or [""])[0])
+                    full = os.path.realpath(os.path.join(ATTACH_DIR, name))
+                    if not name or not full.startswith(os.path.realpath(ATTACH_DIR) + os.sep) or not os.path.isfile(full):
+                        return self._json(404, {"error": "file is not on this device"})
+                    with open(full, "rb") as f:
+                        data = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", ATTACH_TYPES.get(os.path.splitext(full)[1].lower(), "application/octet-stream"))
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Content-Disposition", 'attachment; filename="%s"' % name.replace('"', ""))
+                    self.send_header("Cache-Control", "no-store")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 if path == "/api/dm":
                     with LOCK:
                         return self._json(200, dm_view())

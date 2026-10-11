@@ -2138,6 +2138,30 @@ function variantChips(l) {
     } })));
 }
 
+// Files a lead carries (the report PDF to send along). Tapping one saves it to
+// this device, ready to attach in LinkedIn.
+function attachmentChips(l) {
+  if (!(l.attachments && l.attachments.length)) return null;
+  const grab = async (a, btn) => {
+    btn.disabled = true;
+    try {
+      const res = await fetch(serverBase() + '/api/dm/attachment?file=' + encodeURIComponent(a.file), {
+        headers: { 'X-Sidekick-Key': LS.get('password'), 'ngrok-skip-browser-warning': 'true' } });
+      if (!res.ok) throw new Error(res.status === 404 ? 'That file is on the Mac, not on this device' : 'Could not get the file (' + res.status + ')');
+      const url = URL.createObjectURL(await res.blob());
+      const link = el('a', { href: url, download: a.file });
+      document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      toast('Saved ' + a.file);
+    } catch (e) { toast(e.message || 'Could not get the file', true); } finally { btn.disabled = false; }
+  };
+  return el('div', { class: 'var-chips' }, ...l.attachments.map((a) => {
+    const btn = el('button', { class: 'chip', text: '📎 ' + (a.label || a.file), title: 'Save ' + a.file + ' to attach in LinkedIn' });
+    btn.onclick = () => grab(a, btn);
+    return btn;
+  }));
+}
+
 function messageFocus(list, nodes) {
   const i = pickFocus('message', list);
   if (i < 0) {
@@ -2156,7 +2180,9 @@ function messageFocus(list, nodes) {
   const chips = variantChips(l);
   if (chips) card.append(chips);
   const { ta, count } = messageBox(l);
+  const files = attachmentChips(l);
   card.append(ta, el('div', { class: 'focus-meta' }, el('span', { class: 'muted small', text: 'Tap the text to edit' }), el('span', { class: 'spacer' }), count));
+  if (files) card.append(files);
   card.append(el('div', { class: 'focus-meta' },
     el('button', { class: 'link', text: '✎ Tell Claude what to change', onclick: () => tellClaude(l, ta) }),
     el('span', { class: 'spacer' }),
