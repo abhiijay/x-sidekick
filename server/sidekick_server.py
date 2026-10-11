@@ -101,6 +101,10 @@ LI_ACCEPT_WRITE_EVERY_MIN = max(10, int(env("LI_ACCEPT_WRITE_EVERY_MIN", "120") 
 PEER_URL = env("SIDEKICK_PEER_URL").rstrip("/")
 PEER_PASSWORD = env("SIDEKICK_PEER_PASSWORD") or APP_PASSWORD
 PEER_EVERY_S = max(10, int(env("SIDEKICK_PEER_EVERY_S", "40") or 40))
+# Google Sheet of every LinkedIn person (sheet/Code.gs deployed as a web app).
+SHEET_URL = env("SIDEKICK_SHEET_URL")
+SHEET_TOKEN = env("SIDEKICK_SHEET_TOKEN")
+SHEET_EVERY_S = max(20, int(env("SIDEKICK_SHEET_EVERY_S", "60") or 60))
 if PEER_URL and PEER_URL == PUBLIC_URL:
     # The public URL belongs to the peer, so Claude's callbacks would land there
     # and not here. Find more and Write with Claude stay on the peer.
@@ -1765,6 +1769,108 @@ def peer_loop():
             PEER_WAKE.clear()
 
 
+# ---------------------------------------------------------------- google sheet
+#
+# One Google Sheet lists every LinkedIn person (never X). This server pushes each
+# LinkedIn lead to it and keeps its status and dates current; the sheet's own
+# script (sheet/Code.gs) appends new people and updates the ones it has. People
+# already in the sheet from other work are read back into the touched list, so
+# Find more never brings them in again.
+
+SHEET_STATE_FILE = os.path.join(DATA_DIR, "sheet-state.json")
+SHEET_CHUNK = 40
+SHEET_STATUS = {"on": bool(SHEET_URL and SHEET_TOKEN), "last_ok": None, "error": None,
+                "pushed": 0, "waiting": 0}
+
+
+def sheet_row(l, labels):
+    kind, st = lead_kind(l), l.get("status")
+    status = {"requested": "Request sent", "sent": "DM sent", "replied": "Replied",
+              "skipped": "Stopped", "cant_dm": "Stopped"}.get(st)
+    if not status:
+        status = "Ready to send" if kind == "connect" else "Connected - DM due"
+    day = lambda k: str(l.get(k) or "")[:10]
+    note = ""
+    if st == "cant_dm":
+        note = "cannot message"
+    elif st == "skipped":
+        note = str(l.get("skip_reason") or "skipped")[:120]
+    camp = l.get("campaign") or ""
+    return {"lead_id": l.get("id"), "linkedin": l.get("profile_url") or "", "status": status,
+            "company": str(l.get("product") or "")[:120], "founder": str(l.get("name") or "")[:120],
+            "request_sent": day("requested_ts"), "connected": day("accepted_ts"),
+            "dm_sent": day("sent_ts"), "replied": day("reply_ts"),
+            "website": str(l.get("site") or "")[:200], "notes": note,
+            "group": "Sidekick: " + str(labels.get(camp) or camp or "no campaign")}
+
+
+def sheet_call(body=None, timeout=60):
+    if body is None:
+        req = urllib.request.Request(SHEET_URL + "?" + urllib.parse.urlencode({"token": SHEET_TOKEN}))
+    else:
+        req = urllib.request.Request(SHEET_URL, data=json.dumps(dict(body, token=SHEET_TOKEN)).encode("utf-8"),
+                                     headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        raw = r.read().decode("utf-8", "replace")
+    try:
+        out = json.loads(raw)
+    except ValueError:
+        raise RuntimeError("the sheet did not answer with data: check the web app URL and that access is Anyone")
+    if out.get("error"):
+        raise RuntimeError("sheet: %s" % out["error"])
+    return out
+
+
+def sheet_sync_once():
+    """Push every LinkedIn lead whose sheet row changed since the last push."""
+    state = _load(SHEET_STATE_FILE, "rows")
+    state = state if isinstance(state, dict) else {}
+    labels = {k: v.get("label") for k, v in load_dm_campaigns().items()}
+    todo = []
+    for l in load_dm_leads():
+        if l.get("channel") != "linkedin" or not l.get("id") or not l.get("profile_url"):
+            continue
+        row = sheet_row(l, labels)
+        sig = hashlib.sha1(json.dumps(row, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+        if state.get(row["lead_id"]) != sig:
+            todo.append((row, sig))
+    SHEET_STATUS["waiting"] = len(todo)
+    pushed = 0
+    for i in range(0, len(todo), SHEET_CHUNK):
+        chunk = todo[i:i + SHEET_CHUNK]
+        sheet_call({"rows": [r for r, _ in chunk]})
+        for r, sig in chunk:
+            state[r["lead_id"]] = sig
+        _save(SHEET_STATE_FILE, state, "rows")
+        pushed += len(chunk)
+        SHEET_STATUS["waiting"] = len(todo) - pushed
+    return pushed
+
+
+def sheet_pull_touched():
+    """People the sheet lists count as already contacted for Find more."""
+    people = sheet_call().get("people") or []
+    return touched_merge(["li:" + p["slug"] for p in people if p.get("slug")])
+
+
+def sheet_loop():
+    rounds = 0
+    while True:
+        try:
+            pushed = sheet_sync_once()
+            if rounds % 15 == 0:
+                sheet_pull_touched()
+            rounds += 1
+            SHEET_STATUS.update(last_ok=now_str(), error=None, pushed=SHEET_STATUS["pushed"] + pushed)
+            if pushed:
+                log("sheet: %d LinkedIn rows written" % pushed)
+        except Exception as e:
+            if str(e) != SHEET_STATUS["error"]:
+                log("sheet: %s" % e)
+            SHEET_STATUS["error"] = str(e)[:200]
+        time.sleep(SHEET_EVERY_S)
+
+
 class ArmoryError(Exception):
     pass
 
@@ -2818,7 +2924,7 @@ class AppHandler(BaseHandler):
                              dm=True, dm_ready={ch: dm[ch]["ready"] for ch in DM_CHANNELS},
                              # Here, not in /api/dm: its clock ticks every check, and
                              # that would defeat the 304s on the big DM list.
-                             accept_watch=accept_status(), peer=dict(PEER_STATUS))
+                             accept_watch=accept_status(), peer=dict(PEER_STATUS), sheet=dict(SHEET_STATUS))
                     return self._json(200, h)
                 if path == "/api/sync/digest":
                     return self._json(200, sync_digest())
@@ -3065,6 +3171,9 @@ def main():
     if PEER_URL:
         threading.Thread(target=peer_loop, daemon=True).start()
         log("sync: with %s every %ds" % (urlparse(PEER_URL).netloc, PEER_EVERY_S))
+    if SHEET_STATUS["on"]:
+        threading.Thread(target=sheet_loop, daemon=True).start()
+        log("sheet: LinkedIn people go to the Google Sheet every %ds" % SHEET_EVERY_S)
     try:
         while True:
             time.sleep(3600)
