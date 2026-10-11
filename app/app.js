@@ -2142,24 +2142,41 @@ function variantChips(l) {
 // this device, ready to attach in LinkedIn.
 function attachmentChips(l) {
   if (!(l.attachments && l.attachments.length)) return null;
-  const grab = async (a, btn) => {
+  const fetchFile = async (a) => {
+    const res = await fetch(serverBase() + '/api/dm/attachment?file=' + encodeURIComponent(a.file), {
+      headers: { 'X-Sidekick-Key': LS.get('password'), 'ngrok-skip-browser-warning': 'true' } });
+    if (!res.ok) throw new Error(res.status === 404 ? 'That file is on the Mac, not on this device' : 'Could not get the file (' + res.status + ')');
+    return URL.createObjectURL(await res.blob());
+  };
+  const save = async (a, btn) => {
     btn.disabled = true;
     try {
-      const res = await fetch(serverBase() + '/api/dm/attachment?file=' + encodeURIComponent(a.file), {
-        headers: { 'X-Sidekick-Key': LS.get('password'), 'ngrok-skip-browser-warning': 'true' } });
-      if (!res.ok) throw new Error(res.status === 404 ? 'That file is on the Mac, not on this device' : 'Could not get the file (' + res.status + ')');
-      const url = URL.createObjectURL(await res.blob());
+      const url = await fetchFile(a);
       const link = el('a', { href: url, download: a.file });
       document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
       toast('Saved ' + a.file);
     } catch (e) { toast(e.message || 'Could not get the file', true); } finally { btn.disabled = false; }
   };
-  return el('div', { class: 'var-chips' }, ...l.attachments.map((a) => {
-    const btn = el('button', { class: 'chip', text: '📎 ' + (a.label || a.file), title: 'Save ' + a.file + ' to attach in LinkedIn' });
-    btn.onclick = () => grab(a, btn);
-    return btn;
-  }));
+  // The tab is opened on the tap itself, then pointed at the file, so the
+  // browser does not block it as a pop-up.
+  const view = async (a, btn) => {
+    const tab = window.open('', '_blank');
+    btn.disabled = true;
+    try {
+      const url = await fetchFile(a);
+      if (tab) tab.location = url; else window.location.assign(url);
+    } catch (e) { if (tab) tab.close(); toast(e.message || 'Could not open the file', true); } finally { btn.disabled = false; }
+  };
+  const row = el('div', { class: 'var-chips' });
+  for (const a of l.attachments) {
+    const open = el('button', { class: 'chip', text: '📄 Open ' + (a.label || 'file'), title: 'Open ' + a.file });
+    open.onclick = () => view(a, open);
+    const dl = el('button', { class: 'chip', text: '📎 Save ' + (a.label || 'file'), title: 'Save ' + a.file + ' to attach in LinkedIn' });
+    dl.onclick = () => save(a, dl);
+    row.append(open, dl, el('span', { class: 'muted small', text: a.file }));
+  }
+  return row;
 }
 
 function messageFocus(list, nodes) {
