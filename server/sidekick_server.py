@@ -1252,7 +1252,8 @@ def run_find_stage1(job_id, token):
         keys, names = touched_keys()
         update_job(job_id, status="fetching", progress="starting")
         cands, report = lead_finder.find(
-            need="linkedin" if p["channel"] == "linkedin" else "x", want=p["want"], days=p["days"],
+            need="linkedin" if p["channel"] == "linkedin" else "x", want=p["want"],
+            days=max(p["days"], clamp_int(find_cfg.get("days"), 3, 60, p["days"])),   # a campaign may look further back
             touched=keys, touched_names=names,
             exclude_keywords=find_cfg.get("exclude_keywords") or (),
             require_no_video=bool(find_cfg.get("require_no_video", True)),
