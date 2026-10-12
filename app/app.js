@@ -1902,7 +1902,7 @@ const li = {
   view: { connect: LS.get('li_view_connect', 'focus'), message: LS.get('li_view_message', 'focus') },
   // Stored so a reload (the phone killing the app behind LinkedIn) lands on the same person.
   focus: { connect: LS.get('li_focus_connect', '') || null, message: LS.get('li_focus_message', '') || null }, idx: { connect: 0, message: 0 },
-  q: '', showNeeds: false,
+  q: '', showNeeds: false, aud: LS.get('li_aud', 'icp'),
 };
 const TIER_GROUPS = [['Contact this week', 0], ['Next batch', 1], ['Later', 2], ['No tier', 3]];
 function tierRank(t) { return TIER_RANK[t] ?? 3; }
@@ -2346,6 +2346,44 @@ function attachmentChips(l) {
   return row;
 }
 
+/* Buyers and everyone else are worked differently, so they get their own tab.
+ * A buyer (ICP) gets the four full versions with the report PDF, or nothing yet. */
+function isIcp(l) { return !['light', 'watch'].includes(l.icp); }
+function pdfPending(l) { return !!l.needs_report && !(l.attachments && l.attachments.length); }
+function hasMessage(l) { return !!((l.variants && l.variants.length) || l.library || typeof l.draft_text === 'string'); }
+async function setAsk(l, on) {
+  try { await dmSave(l, { use_ask: on }); await refresh(); } catch (e) { toast(e.message, true); }
+}
+function pdfBadge(l) {
+  if (!pdfPending(l)) return null;
+  return el('div', { class: 'pdf-badge' + (l.ask_on ? ' ask' : '') },
+    el('b', { text: l.ask_on ? 'Asking first' : 'PDF to be made' }),
+    el('span', { text: l.ask_on ? ' · the report gets made if they say yes' : ' · no message until the report is ready' }));
+}
+
+/* A buyer with no report yet: nothing to send, on purpose. */
+function pdfWaitingCard(list, i, nodes) {
+  const l = list[i];
+  const card = el('div', { class: 'card focus-card' });
+  card.append(focusHeader(i, list.length, l),
+    el('div', { class: 'focus-name', text: l.name || 'LinkedIn lead' }),
+    l.product ? el('div', { class: 'focus-product', text: l.product }) : null,
+    pdfBadge(l), dmFlags(l, ''),
+    el('p', { class: 'hint', text: 'The four versions are written once the AI report is made for ' + (l.product || 'them') + '. Ask Claude on the Mac to make it.' }));
+  if (l.ask_variants && l.ask_variants.length) {
+    card.append(el('button', { class: 'btn block', text: 'Ask first instead (' + l.ask_variants.length + ' short versions)',
+      title: 'Send a short message that asks before any research is done', onclick: () => setAsk(l, true) }));
+  }
+  card.append(focusNav('message', list, i));
+  nodes.push(card);
+  const nx = upNext('message', list, i);
+  if (nx) nodes.push(nx);
+  setDmActions([
+    el('button', { class: 'btn grow', text: 'Skip', onclick: () => dmStatus(l, 'skipped', { reason: 'skipped on phone' }, 'Skipped ' + dmWho(l), 'ready') }),
+    el('button', { class: 'btn icon', text: '⋯', onclick: () => dmMenu(l) }),
+  ]);
+}
+
 function messageFocus(list, nodes) {
   const i = pickFocus('message', list);
   if (i < 0) {
@@ -2354,12 +2392,15 @@ function messageFocus(list, nodes) {
     return;
   }
   const l = list[i];
+  if (pdfPending(l) && !hasMessage(l)) { pdfWaitingCard(list, i, nodes); return; }
   const opened = dm.opened.has(l.id);
   const card = el('div', { class: 'card focus-card' + (opened ? ' opened' : '') });
   card.append(focusHeader(i, list.length, l),
     el('div', { class: 'focus-name', text: l.name || 'LinkedIn lead' }),
     l.product ? el('div', { class: 'focus-product', text: l.product }) : null);
   if (opened) card.append(el('div', { class: 'focus-hint', text: 'Sent it? Tap Sent. Changed it in LinkedIn? Paste what you sent over the text first.' }));
+  const badge = pdfBadge(l);
+  if (badge) card.append(badge);
   card.append(dmFlags(l, ''));
   const chips = variantChips(l);
   if (chips) card.append(chips);
@@ -2371,6 +2412,7 @@ function messageFocus(list, nodes) {
     el('button', { class: 'link', text: '✎ Tell Claude what to change', onclick: () => tellClaude(l, ta) }),
     el('span', { class: 'spacer' }),
     l.claude_url ? el('button', { class: 'link', text: 'Claude chat ↗', onclick: () => openChat(l, ta.value) }) : null));
+  if (l.ask_on) card.append(el('button', { class: 'link', text: 'Wait for the PDF instead', onclick: () => setAsk(l, false) }));
   card.append(focusNav('message', list, i));
   nodes.push(card);
   const nx = upNext('message', list, i);
@@ -2459,16 +2501,28 @@ function renderLinkedIn(root) {
   const saved = state.outreach.filter((o) => o.platform === 'linkedin' && o.status === 'queued');
   const ready = mine.filter((l) => l.status === 'ready' && inCamp(l)).sort(byTier);
   const needs = ready.filter((l) => l.needs_message);
-  const writable = ready.filter((l) => !l.needs_message);
+  const allWritable = ready.filter((l) => !l.needs_message);
+  const nIcp = allWritable.filter(isIcp).length;
+  if (!['icp', 'other'].includes(li.aud)) li.aud = 'icp';
+  // Buyers with something to send come before the ones still waiting on a PDF.
+  const writable = allWritable.filter((l) => isIcp(l) === (li.aud === 'icp'))
+    .sort((x, y) => (hasMessage(y) - hasMessage(x)) || byTier(x, y));
   const sent = mine.filter((l) => l.status === 'sent' && inCamp(l)).sort((a, b) => (b.sent_ts || '').localeCompare(a.sent_ts || ''));
   const done = mine.filter((l) => ['replied', 'skipped', 'cant_dm'].includes(l.status) && inCamp(l))
     .sort((a, b) => ((b.status === 'replied') - (a.status === 'replied')) || (b.updated_ts || '').localeCompare(a.updated_ts || ''));
   const replied = done.filter((l) => l.status === 'replied').length;
-  nodes.push(segBar(DM_SEGS, dm.seg[ch], { send: writable.length, sent: sent.length, done: replied, saved: saved.length },
+  nodes.push(segBar(DM_SEGS, dm.seg[ch], { send: allWritable.length, sent: sent.length, done: replied, saved: saved.length },
     (k) => { dm.seg[ch] = k; LS.set('dmseg_' + ch, k); li.q = ''; renderDm(ch); }));
   const which = dm.seg[ch];
   if (which === 'send') {
     if (needs.length) nodes.push(needsBanner(needs));
+    const waitingPdf = allWritable.filter((l) => isIcp(l) && pdfPending(l) && !hasMessage(l)).length;
+    nodes.push(el('div', { class: 'aud-tabs' },
+      ...[['icp', 'ICP', nIcp], ['other', 'Not ICP', allWritable.length - nIcp]].map(([k, label, n]) =>
+        el('button', { class: 'aud' + (li.aud === k ? ' on' : ''), onclick: () => {
+          li.aud = k; LS.set('li_aud', k); li.focus.message = null; li.q = ''; renderDm(ch); window.scrollTo(0, 0);
+        } }, label, el('b', { text: ' ' + n })))));
+    if (li.aud === 'icp' && waitingPdf) nodes.push(el('p', { class: 'hint', text: waitingPdf + (waitingPdf === 1 ? ' buyer is' : ' buyers are') + ' waiting on a report PDF. They have no message on purpose.' }));
     nodes.push(el('div', { class: 'view-row' }, viewToggle('message', writable.length), el('span', { class: 'spacer' }),
       writable.length ? el('button', { class: 'pill-chip', text: '✎ Fix all', title: 'The whole batch is wrong: rewrite all with a note', onclick: () => fixAllMessages(writable.filter((l) => l.variants && l.variants.length).length) }) : null,
       campFilterChip(camps)));

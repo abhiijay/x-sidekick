@@ -418,3 +418,9 @@ a.chip { text-decoration: none; display: inline-flex; align-items: center; }
 .pill-chip:disabled { opacity: .45; }
 .tag-row { display: flex; gap: 6px; flex-wrap: wrap; }
 .modeled { margin-top: 4px; font-style: italic; }
+.aud-tabs { display: flex; gap: 8px; margin: 10px 0 6px; }
+.aud { flex: 1; padding: 9px 10px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--surface); font-size: 15px; font-weight: 600; color: var(--muted); }
+.aud.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.pdf-badge { margin: 8px 0; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); font-size: 14px; color: var(--muted); }
+.pdf-badge b { color: var(--warn); }
+.pdf-badge.ask b { color: var(--accent); }

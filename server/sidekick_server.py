@@ -1107,6 +1107,17 @@ def dm_update(body):
                 lead.pop("pick", None)
         if isinstance(body.get("variant_index"), int):
             lead["variant_index"] = max(0, body["variant_index"])
+        # A buyer whose report is not made yet has no message. "Ask first" puts
+        # the short ask-first versions on the card; turning it off waits for the PDF.
+        if isinstance(body.get("use_ask"), bool) and lead.get("needs_report"):
+            if body["use_ask"] and lead.get("ask_variants"):
+                lead["variants"] = [dict(v) for v in lead["ask_variants"]]
+                lead["ask_on"] = True
+            else:
+                lead["variants"] = []
+                lead.pop("ask_on", None)
+            lead["variant_index"] = 0
+            lead.pop("draft_text", None)
         if isinstance(body.get("note"), str):
             lead["note"] = body["note"][:500]
         if isinstance(body.get("reply_text"), str):
@@ -1144,7 +1155,9 @@ def dm_update(body):
                 lead["accepted_ts"] = ts
                 lead["kind"] = "message"
                 lead["status"] = "ready"
-                if not lead.get("variants") and not lead.get("library"):
+                # Someone waiting on their report PDF is not "missing a message":
+                # the app shows them as "PDF to be made" in the ICP tab.
+                if not lead.get("variants") and not lead.get("library") and not lead.get("needs_report"):
                     lead["needs_message"] = True
             elif new == "ready":
                 if lead_kind(lead) == "connect":
@@ -1480,8 +1493,26 @@ def agent_write_dm(job, body):
                 lead.pop("writing_job", None)
                 lead["updated_ts"] = now_str()
                 continue
-            if variants and lead.get("status") == "ready":
-                lead["variants"] = variants[:3]
+            if it.get("needs_report") and lead.get("status") == "ready":
+                # A real buyer with no report yet: no message is put on the card.
+                # The ask-first versions wait behind a button; the four full
+                # versions come with the PDF, from Cowork.
+                ask = [{"label": str(v.get("label") or "Ask first")[:40], "text": str(v.get("text"))[:DM_TEXT_MAX]}
+                       for v in (it.get("ask_variants") or []) if isinstance(v, dict) and str(v.get("text") or "").strip()]
+                lead["needs_report"] = True
+                lead["ask_variants"] = ask[:3]
+                if not lead.get("ask_on"):
+                    lead["variants"] = []
+                lead.pop("needs_message", None)
+                lead.pop("fix_note", None)
+                lead.pop("previous_text", None)
+                written += 1
+            elif variants and lead.get("status") == "ready":
+                lead["variants"] = variants[:4]
+                # The full set arrived (the report is made): nothing is pending any more.
+                if lead.get("attachments"):
+                    for k in ("needs_report", "ask_variants", "ask_on"):
+                        lead.pop(k, None)
                 lead["variant_index"] = 0
                 lead.pop("needs_message", None)
                 lead.pop("draft_text", None)
