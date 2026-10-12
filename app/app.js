@@ -2517,15 +2517,16 @@ function renderLinkedIn(root) {
   if (which === 'send') {
     if (needs.length) nodes.push(needsBanner(needs));
     const waitingPdf = allWritable.filter((l) => isIcp(l) && pdfPending(l) && !hasMessage(l)).length;
-    nodes.push(el('div', { class: 'aud-tabs' },
-      ...[['icp', 'ICP', nIcp], ['other', 'Not ICP', allWritable.length - nIcp]].map(([k, label, n]) =>
-        el('button', { class: 'aud' + (li.aud === k ? ' on' : ''), onclick: () => {
+    // Buyers or everyone else, as a second toggle beside One by one / List.
+    const audToggle = el('div', { class: 'mini-seg' },
+      ...[['icp', 'ICP', nIcp], ['other', 'Non-ICP', allWritable.length - nIcp]].map(([k, label, n]) =>
+        el('button', { class: li.aud === k ? 'on' : '', text: label + ' (' + n + ')', onclick: () => {
           li.aud = k; LS.set('li_aud', k); li.focus.message = null; li.q = ''; renderDm(ch); window.scrollTo(0, 0);
-        } }, label, el('b', { text: ' ' + n })))));
-    if (li.aud === 'icp' && waitingPdf) nodes.push(el('p', { class: 'hint', text: waitingPdf + (waitingPdf === 1 ? ' buyer is' : ' buyers are') + ' waiting on a report PDF. They have no message on purpose.' }));
-    nodes.push(el('div', { class: 'view-row' }, viewToggle('message', writable.length), el('span', { class: 'spacer' }),
+        } })));
+    nodes.push(el('div', { class: 'view-row' }, viewToggle('message', writable.length), audToggle, el('span', { class: 'spacer' }),
       writable.length ? el('button', { class: 'pill-chip', text: '✎ Fix all', title: 'The whole batch is wrong: rewrite all with a note', onclick: () => fixAllMessages(writable.filter((l) => l.variants && l.variants.length).length) }) : null,
       campFilterChip(camps)));
+    if (li.aud === 'icp' && waitingPdf) nodes.push(el('p', { class: 'hint', text: waitingPdf + (waitingPdf === 1 ? ' buyer is' : ' buyers are') + ' waiting on a report PDF. They have no message on purpose.' }));
     if (li.view.message === 'list') messageList(writable, nodes); else messageFocus(writable, nodes);
   } else {
     setDmActions(null);

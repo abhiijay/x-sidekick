@@ -424,3 +424,5 @@ a.chip { text-decoration: none; display: inline-flex; align-items: center; }
 .pdf-badge { margin: 8px 0; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); font-size: 14px; color: var(--muted); }
 .pdf-badge b { color: var(--warn); }
 .pdf-badge.ask b { color: var(--accent); }
+.view-row { flex-wrap: wrap; row-gap: 8px; }
+.view-row .mini-seg + .mini-seg { margin-left: 8px; }
