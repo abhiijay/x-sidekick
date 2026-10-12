@@ -275,7 +275,8 @@ async function refresh() {
     $('dot').className = 'dot ok';
     $('dot').title = local.on ? 'connected directly (server on this phone)' : 'connected';
     state.acceptWatch = h.accept_watch || null;
-    if (h.sends != null) $('sendsCount').textContent = 'Replies Claude learns from: ' + h.sends;
+    if (h.sends != null) $('sendsCount').textContent = 'Replies Claude learns from: ' + h.sends
+      + (h.rejects != null ? ' · rejected drafts it learns from: ' + h.rejects : '');
     syncChip(h.peer);
     const warn = [];
     // A server that syncs with another device leaves Claude's jobs to that one.
@@ -326,6 +327,73 @@ function postBlock(text, cls = 'post') {
   const p = el('div', { class: cls, text: text || 'Text not fetched yet. Claude will fetch it.' });
   p.addEventListener('click', () => p.classList.toggle('open'));
   return p;
+}
+
+/* What the post shows besides its text: pictures, a video, a quoted post. The
+ * server looks these up; without them a take on "the layout" is a guess. */
+function postExtras(it) {
+  const nodes = [];
+  if (it.quote && it.quote.text) {
+    nodes.push(el('div', { class: 'quote' },
+      el('b', { text: it.quote.author ? '@' + it.quote.author : 'Quoted post' }),
+      el('div', { text: it.quote.text })));
+  }
+  const media = Array.isArray(it.media) ? it.media : [];
+  if (media.length) {
+    nodes.push(el('div', { class: 'media' + (media.length === 1 ? ' one' : '') }, ...media.map((m) => {
+      const isVid = m.type !== 'photo';
+      const a = el('a', { class: 'media-item' + (isVid ? ' vid' : ''), href: isVid ? (postUrl(it) || m.url) : m.url, target: '_blank', rel: 'noopener' },
+        el('img', { src: m.thumb || m.url, loading: 'lazy', alt: isVid ? 'Video in the post' : 'Image in the post', referrerpolicy: 'no-referrer' }));
+      return a;
+    })));
+  }
+  return nodes;
+}
+
+/* His take on the post, before Claude drafts. This is the part no voice file
+ * can supply: what he actually thinks. Saved as he types (or speaks). */
+function takeBox(it) {
+  const box = el('textarea', { class: 'take-box', rows: 2,
+    placeholder: 'What do you think of this post? A few words is enough: "boring", "how does he get traffic?", "tried it, slow"' });
+  box.value = it.take || '';
+  let timer;
+  const mark = el('span', { class: 'take-state muted', text: it.take ? 'Saved' : '' });
+  const save = async () => {
+    const v = box.value.trim();
+    if (v === (it.take || '')) return;
+    try { await api('/api/queue/update', { id: it.id, take: v }); it.take = v; mark.textContent = v ? 'Saved' : ''; updateDraftAll(); }
+    catch (e) { mark.textContent = 'Not saved'; }
+  };
+  box.addEventListener('input', () => { mark.textContent = '…'; clearTimeout(timer); timer = setTimeout(save, 900); });
+  box.addEventListener('blur', () => { clearTimeout(timer); save(); });
+  const row = el('div', { class: 'take-row' }, el('label', { class: 'sent-label', text: 'Your take' }), el('span', { class: 'spacer' }), mark);
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR) {
+    let rec = null;
+    const mic = el('button', { class: 'btn sm', text: '🎤 Speak', title: 'Say your take out loud', onclick: () => {
+      if (rec) { rec.stop(); return; }
+      rec = new SR();
+      rec.lang = 'en-IN'; rec.interimResults = false; rec.continuous = false;
+      mic.textContent = '■ Stop'; mic.classList.add('on');
+      rec.onresult = (ev) => {
+        const said = Array.from(ev.results).map((r) => r[0].transcript).join(' ').trim();
+        if (said) { box.value = (box.value.trim() ? box.value.trim() + ' ' : '') + said; save(); }
+      };
+      rec.onerror = (ev) => { if (ev.error !== 'no-speech' && ev.error !== 'aborted') toast('Mic: ' + ev.error, true); };
+      rec.onend = () => { rec = null; mic.textContent = '🎤 Speak'; mic.classList.remove('on'); };
+      try { rec.start(); } catch (e) { rec = null; mic.textContent = '🎤 Speak'; mic.classList.remove('on'); }
+    } });
+    row.append(mic);
+  }
+  return el('div', { class: 'take' }, row, box);
+}
+
+function updateDraftAll() {
+  const waiting = state.items.filter((i) => i.status === 'queued');
+  const withTake = waiting.filter((i) => (i.take || '').trim()).length;
+  $('draftAllBtn').textContent = waiting.length
+    ? 'Draft all ' + waiting.length + ' with Claude' + (withTake ? ' · ' + withTake + ' with your take' : '')
+    : 'Nothing waiting';
 }
 
 function itemMenu(it) {
@@ -391,7 +459,10 @@ function retryDraft(it) {
 function draftCard(it, opts = {}) {
   const card = el('div', { class: 'card' + (opts.focus ? ' focus-card' : '') },
     whoRow(it.author, ago(it.ts) + (it.author_followers ? ' · ' + num(it.author_followers) + ' followers' : ''), () => itemMenu(it)),
-    postBlock(postText(it)));
+    postBlock(postText(it), 'post open'), ...postExtras(it));
+  // The take the drafts were written from. If he has changed it since, Retry uses the new one.
+  const usedTake = it.take_used || it.take;
+  if (usedTake) card.append(el('div', { class: 'take-used' }, el('b', { text: 'Your take: ' }), el('span', { text: usedTake })));
   if (it.agent_note) card.append(el('div', { class: 'flag' }, el('b', { text: '!' }), el('span', { text: it.agent_note })));
 
   let chosen = typeof it.chosen_index === 'number' ? it.chosen_index : null;
@@ -462,7 +533,7 @@ function draftCard(it, opts = {}) {
     box.append(el('div', { class: 'draft-foot' },
       el('button', { class: 'voice', text: voiceLabel(d.angle), title: 'Why this reply', onclick: () => { angle.hidden = !angle.hidden; } }),
       el('span', { class: 'spacer' }),
-      el('button', { class: 'btn sm', text: 'Reject', title: 'Bad reply - drop it and record why',
+      el('button', { class: 'btn sm bad', text: '✕ Reject', title: 'Bad reply - drop it and record why',
         onclick: () => rejectDraft(it, idx, d) }),
       el('button', { class: 'btn sm', text: 'Edit', onclick: edit }),
       el('button', { class: 'btn sm', text: 'Copy', onclick: async () => { pick(); toast((await copy(textOf(idx))) ? 'Copied' : 'Copy failed', false); } }),
@@ -582,9 +653,15 @@ function renderReady(ready, emptyText) {
 
 function waitingCard(it) {
   const card = el('div', { class: 'card' },
-    whoRow(it.author, it.drafting_job ? 'Claude is drafting…' : ago(it.ts), () => itemMenu(it)),
-    postBlock(postText(it), 'post short'));
+    // Only while that run is really going: a failed run used to leave this label on forever.
+    whoRow(it.author, it.drafting_job && activeJobs('draft').some((j) => j.id === it.drafting_job) ? 'Claude is drafting…' : ago(it.ts), () => itemMenu(it)),
+    // The whole post, never a preview: he is giving his opinion on it here.
+    postBlock(postText(it), 'post open'), ...postExtras(it));
+  if (postUrl(it)) card.append(el('a', { class: 'link open-x', href: postUrl(it), target: '_blank', rel: 'noopener', text: 'Open on X' }));
+  if (it.retry_note) card.append(el('div', { class: 'flag' }, el('b', { text: '↻' }), el('span', { text: 'Redo: ' + it.retry_note })));
   if (it.agent_note) card.append(el('div', { class: 'flag' }, el('b', { text: '!' }), el('span', { text: it.agent_note })));
+  // Always there: a take added while Claude is drafting still counts for a Retry.
+  card.append(takeBox(it));
   return card;
 }
 
@@ -606,7 +683,7 @@ function renderReplies() {
   $('waitingCount').textContent = waiting.length || '';
   $('navBadge').textContent = ready.length || '';
   $('draftAllBtn').disabled = !waiting.length || activeJobs('draft').length > 0;
-  $('draftAllBtn').textContent = waiting.length ? 'Draft all ' + waiting.length + ' with Claude' : 'Nothing waiting';
+  updateDraftAll();
 
   const job = activeJobs('draft')[0] || state.jobs.find((j) => j.kind === 'draft' && j.status === 'failed' && Date.now() - new Date(j.ts.replace(' ', 'T')).getTime() < 3600e3);
   const pill = $('jobPill');

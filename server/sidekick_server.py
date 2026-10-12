@@ -117,7 +117,7 @@ JOB_TOKEN_TTL = 3 * 3600
 SCOUT_WINDOW_HOURS = 24
 SCOUT_CHUNK = 10
 SCOUT_MAX_CANDIDATES = 60
-VOICE_EXAMPLES = 30
+VOICE_EXAMPLES = 80
 DRAFT_CHUNK = 20            # items per routine run; keeps each payload draftable
 
 # Retention. These were sized for a handful of replies a day. At 100/day every
@@ -403,6 +403,11 @@ def queue_update(body):
                 i["sent_verbatim"] = body["sent_verbatim"]
             if isinstance(body.get("note"), str):
                 i["note"] = body["note"][:500]
+            # What he thinks of the post, said before drafting. The drafts are
+            # written from it, and it is kept with the send so later runs learn
+            # what he tends to think about each kind of post.
+            if isinstance(body.get("take"), str):
+                i["take"] = body["take"].strip()[:800]
             save_queue(items)
             # The learning loop: his real wording goes straight into the durable
             # voice corpus, so it survives the queue being archived or trimmed.
@@ -1590,6 +1595,64 @@ def feedback_merge(notes):
     return len(new)
 
 
+# The reply learning logs: what he threw away and why, his notes on whole
+# batches, and what he actually sent. They were written on whichever device he
+# tapped on and never left it, so the other device (and Cowork on the Mac)
+# drafted without them. Append-only lists, merged by a key, newest first.
+def _send_key(e):
+    return _norm_send(e.get("posted_text"))
+
+
+def _note_key(e):
+    return "%s|%s" % (e.get("ts"), _norm_send(e.get("text")))
+
+
+def _reject_key(e):
+    return "%s|%s" % (_norm_send(e.get("text")), _norm_send(e.get("post"))[:80])
+
+
+REPLY_LOGS = {"rejects": (REJECTS_FILE, "rejects", _reject_key, REJECTS_KEEP),
+              "reply_feedback": (REPLY_FEEDBACK_FILE, "notes", _note_key, 2000),
+              "sends": (SENDS_FILE, "sends", _send_key, SENDS_KEEP)}
+REPLY_LOG_PAGE = 400
+
+
+def reply_log(name):
+    return load_sends() if name == "sends" else _load(*REPLY_LOGS[name][:2])
+
+
+def reply_log_stamp(name):
+    keys = sorted(REPLY_LOGS[name][2](e) for e in reply_log(name))
+    return {"n": len(keys), "sha": hashlib.sha1("\n".join(keys).encode("utf-8")).hexdigest()[:16]}
+
+
+def reply_log_merge(name, entries):
+    if name not in REPLY_LOGS:
+        return 0
+    path, key, keyfn, keep = REPLY_LOGS[name]
+    with LOCK:
+        mine = reply_log(name)
+        at = {keyfn(e): e for e in mine}
+        new = 0
+        for e in entries or []:
+            if not isinstance(e, dict) or not keyfn(e).strip("|"):
+                continue
+            cur = at.get(keyfn(e))
+            if cur is None:
+                at[keyfn(e)] = e
+                mine.append(e)
+                new += 1
+            else:                   # same entry: take fields this side lacks
+                for f, v in e.items():
+                    if f not in cur and v not in (None, ""):
+                        cur[f] = v
+                        new += 1
+        if new:
+            mine.sort(key=lambda e: str(e.get("ts") or ""), reverse=True)
+            _save(path, mine[:keep], key)
+    return new
+
+
 def sync_digest():
     with LOCK:
         leads = {l["id"]: lead_version(l) for l in load_dm_leads()
@@ -1598,7 +1661,8 @@ def sync_digest():
         return {"leads": leads,
                 "docs": {name: doc_stamp(name) for name in SYNC_DOCS},
                 "touched": {"n": len(flat), "sha": hashlib.sha1("\n".join(flat).encode("utf-8")).hexdigest()[:16]},
-                "feedback": len(load_dm_feedback())}
+                "feedback": len(load_dm_feedback()),
+                "reply_logs": {name: reply_log_stamp(name) for name in REPLY_LOGS}}
 
 
 def sync_get(body):
@@ -1674,6 +1738,9 @@ def sync_put(body):
             out.setdefault("docs", {})[name] = doc_put(name, doc.get("updated"), doc.get("data"))
     if isinstance(body.get("feedback"), list):
         out["feedback"] = feedback_merge(body["feedback"])
+    for name, entries in (body.get("reply_logs") or {}).items():
+        if name in REPLY_LOGS and isinstance(entries, list):
+            out.setdefault("reply_logs", {})[name] = reply_log_merge(name, entries)
     return 200, out
 
 
@@ -1751,6 +1818,22 @@ def peer_sync_once():
     if theirs.get("feedback") != mine["feedback"]:
         feedback_merge(peer_call("/api/sync/doc?name=feedback").get("data"))
         peer_call("/api/sync/put", {"feedback": load_dm_feedback()[:200]})
+
+    # A peer on older code has no reply_logs in its digest: skip until it updates.
+    for name, far in (theirs.get("reply_logs") or {}).items():
+        if name not in REPLY_LOGS or far == mine["reply_logs"][name]:
+            continue
+        off = 0
+        while off < int(far.get("n") or 0):
+            page = peer_call("/api/sync/doc?name=reply:%s&offset=%d" % (name, off)).get("data") or []
+            if not page:
+                break
+            reply_log_merge(name, page)
+            off += REPLY_LOG_PAGE
+        with LOCK:
+            rows = list(reply_log(name))
+        for n in range(0, len(rows), REPLY_LOG_PAGE):
+            peer_call("/api/sync/put", {"reply_logs": {name: rows[n:n + REPLY_LOG_PAGE]}})
     return pulled, pushed
 
 
@@ -1912,6 +1995,90 @@ def fetch_tweet(tweet_id):
     return tweets[0] if tweets else None
 
 
+# What a post shows besides its text. Armory returns text only, so a reply about
+# "the layout" or "the video" was written blind. This public read-only lookup
+# gives the pictures, the video thumbnail, the quoted post and the full text of
+# a long post. Set SIDEKICK_MEDIA_API to "off" to disable it.
+MEDIA_API = env("SIDEKICK_MEDIA_API", "https://api.fxtwitter.com/status/")
+MEDIA_TRIES = 3
+
+
+def fetch_post_extras(tweet_id, timeout=10):
+    req = urllib.request.Request(MEDIA_API + str(tweet_id),
+                                 headers={"User-Agent": "sidekick/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        t = (json.loads(r.read().decode("utf-8", "replace")) or {}).get("tweet") or {}
+    media = []
+    for m in ((t.get("media") or {}).get("all") or [])[:6]:
+        if not isinstance(m, dict) or not str(m.get("url") or "").startswith("https://"):
+            continue
+        e = {"type": str(m.get("type") or "photo")[:10], "url": m["url"][:600]}
+        if str(m.get("thumbnail_url") or "").startswith("https://"):
+            e["thumb"] = m["thumbnail_url"][:600]
+        media.append(e)
+    out = {"media": media, "text": str(t.get("text") or "")}
+    q = t.get("quote")
+    if isinstance(q, dict) and q.get("text"):
+        out["quote"] = {"author": str((q.get("author") or {}).get("screen_name") or "")[:60],
+                        "text": str(q["text"])[:1500]}
+    return out
+
+
+def enrich_item(item_id):
+    """Add media, quoted post and full text to one queued X post. True if it changed."""
+    if MEDIA_API.lower() in ("", "off"):
+        return False
+    with LOCK:
+        it = next((i for i in load_queue() if i.get("id") == item_id), None)
+        tid = it and it.get("tweet_id")
+    if not tid:
+        return False
+    try:
+        ex = fetch_post_extras(tid)
+    except Exception as e:          # the lookup is a nice-to-have, never a blocker
+        ex = None
+        err = repr(e)[:120]
+    with LOCK:
+        items = load_queue()
+        it = next((i for i in items if i.get("id") == item_id), None)
+        if not it:
+            return False
+        if ex is None:
+            it["media_tries"] = int(it.get("media_tries") or 0) + 1
+            if it["media_tries"] >= MEDIA_TRIES:
+                it["media_checked"] = now_str()
+                it["media_error"] = err
+        else:
+            it["media_checked"] = now_str()
+            it.pop("media_tries", None)
+            if ex["media"]:
+                it["media"] = ex["media"]
+            if ex.get("quote"):
+                it["quote"] = ex["quote"]
+            if len(ex["text"]) > len(it.get("tweet_text") or ""):
+                it["tweet_text"] = ex["text"][:4000]
+                it.pop("text_missing", None)
+        save_queue(items)
+    return True
+
+
+def enrich_pending(limit=10, statuses=("queued", "drafted")):
+    with LOCK:
+        todo = [i["id"] for i in load_queue()
+                if i.get("status") in statuses and i.get("platform", "x") == "x"
+                and i.get("tweet_id") and not i.get("media_checked")][:limit]
+    return sum(1 for i in todo if enrich_item(i))
+
+
+def enrich_loop():
+    while True:
+        try:
+            enrich_pending()
+        except Exception as e:
+            log("enrich failed: %r" % e)
+        time.sleep(45)
+
+
 # Paths Claude may reach through /agent/armory/... (read-only research routes).
 AGENT_ARMORY_ALLOWED = ("/twitter/tweet", "/twitter/thread", "/twitter/replies",
                         "/twitter/user", "/twitter/search", "/twitter/credits")
@@ -2064,6 +2231,12 @@ def load_sends():
     return sends
 
 
+def draft_voice(d):
+    """The voice a draft was written in: the first part of its angle."""
+    first = re.split(r"\s[·\-–|]\s", str(d.get("angle") or ""))[0].strip()
+    return first[:24] if first else ""
+
+
 def record_send(item, verbatim=None):
     """Append one reply he actually sent. Called when an item is marked posted.
 
@@ -2086,6 +2259,18 @@ def record_send(item, verbatim=None):
             verbatim = item["sent_verbatim"]
         if verbatim is not None:
             entry["verbatim"] = bool(verbatim)
+        if item.get("take"):
+            entry["take"] = item["take"]
+        if item.get("post_type"):
+            entry["post_type"] = item["post_type"]
+        offered = [{"voice": draft_voice(d), "text": d.get("text", "")}
+                   for d in (item.get("drafts") or []) if d.get("text")]
+        if offered:
+            # What he was offered next to what he sent: the edit is the lesson.
+            entry["offered"] = offered[:6]
+            ci = item.get("chosen_index")
+            if isinstance(ci, int) and 0 <= ci < len(offered):
+                entry["chosen_voice"] = offered[ci]["voice"]
         sends.insert(0, entry)
         _save(SENDS_FILE, sends[:SENDS_KEEP], "sends")
 
@@ -2231,20 +2416,28 @@ def voice_examples():
     """
     out, seen = [], set()
 
-    def add(post, author, text):
+    def add(post, author, text, src):
         k = _norm_send(text)
         if not k or k in seen:
             return
         seen.add(k)
-        out.append({"post": (post or "")[:600], "author": author, "posted_text": text})
+        e = {"post": (post or "")[:400], "author": author, "posted_text": text}
+        # post_type lets the writer pick the examples nearest to the post in
+        # hand; take shows what he thought before he wrote it.
+        for f in ("post_type", "take", "verbatim"):
+            if src.get(f) not in (None, ""):
+                e[f] = src[f]
+        if src.get("sent_verbatim") is not None:
+            e["verbatim"] = bool(src["sent_verbatim"])
+        out.append(e)
 
     for i in load_queue():
         if i.get("status") == "posted" and i.get("posted_text"):
-            add(i.get("tweet_text") or i.get("text"), i.get("author"), i["posted_text"])
+            add(i.get("tweet_text") or i.get("text"), i.get("author"), i["posted_text"], i)
     for s in load_sends():
         if len(out) >= VOICE_EXAMPLES:
             break
-        add(s.get("post"), s.get("author"), s.get("posted_text"))
+        add(s.get("post"), s.get("author"), s.get("posted_text"), s)
     return out[:VOICE_EXAMPLES]
 
 
@@ -2504,6 +2697,9 @@ def ingest_share(body):
 def agent_job_payload(job):
     if job["kind"] == "draft":
         ids = set(job["payload"].get("item_ids", []))
+        for i in [i for i in load_queue() if i.get("id") in ids and i.get("tweet_id")
+                  and not i.get("media_checked")]:
+            enrich_item(i["id"])
         items = [i for i in load_queue() if i.get("id") in ids]
         return {"job_id": job["id"], "kind": "draft", "account": job["payload"].get("account"),
                 "note": job["payload"].get("note"), "items": items,
@@ -2551,11 +2747,18 @@ def agent_write_drafts(job, body):
             it = by_id.get(r.get("id"))
             if not it or it["id"] not in allowed:
                 continue
-            if r.get("tweet_text") and it.get("text_missing"):
-                it["tweet_text"] = str(r["tweet_text"])[:4000]
+            full = str(r.get("tweet_text") or "")
+            # Also when the capture was only cut short: the app shows this text
+            # and he gives his take on it, so it has to be the whole post.
+            if full and (it.get("text_missing") or len(full) > len(it.get("tweet_text") or "")):
+                it["tweet_text"] = full[:4000]
                 it.pop("text_missing", None)
+            if r.get("post_type"):
+                it["post_type"] = str(r["post_type"])[:40]
             drafts = [{"text": str(d.get("text", ""))[:1000], "angle": str(d.get("angle", ""))[:300]}
                       for d in (r.get("drafts") or []) if isinstance(d, dict) and d.get("text")]
+            if drafts and it.get("take"):
+                it["take_used"] = it["take"]     # the take these drafts were written from
             if isinstance(r.get("avery_reference"), dict):
                 it["avery_reference"] = {k: str(r["avery_reference"].get(k, ""))[:600]
                                          for k in ("example", "pattern", "template", "source_url")}
@@ -2927,6 +3130,8 @@ class AppHandler(BaseHandler):
                     h.update(armory=armory_configured(), routine=routine_configured(),
                              watchlist=len(parse_watchlist()[0]),
                              sends=len(load_sends()),
+                             rejects=len(_load(REJECTS_FILE, "rejects")),
+                             reply_notes=len(_load(REPLY_FEEDBACK_FILE, "notes")),
                              dm=True, dm_ready={ch: dm[ch]["ready"] for ch in DM_CHANNELS},
                              # Here, not in /api/dm: its clock ticks every check, and
                              # that would defeat the 304s on the big DM list.
@@ -2944,6 +3149,10 @@ class AppHandler(BaseHandler):
                     name = (parse_qs(urlparse(self.path).query).get("name") or [""])[0]
                     if name == "feedback":
                         return self._json(200, {"data": load_dm_feedback()[:200]})
+                    if name.startswith("reply:") and name[6:] in REPLY_LOGS:
+                        off = clamp_int((parse_qs(urlparse(self.path).query).get("offset") or ["0"])[0], 0, 10 ** 7, 0)
+                        with LOCK:
+                            return self._json(200, {"data": reply_log(name[6:])[off:off + REPLY_LOG_PAGE]})
                     if name not in SYNC_DOCS:
                         return self._json(404, {"error": "unknown doc"})
                     with LOCK:
@@ -3200,6 +3409,7 @@ def main():
     if PEER_URL:
         threading.Thread(target=peer_loop, daemon=True).start()
         log("sync: with %s every %ds" % (urlparse(PEER_URL).netloc, PEER_EVERY_S))
+    threading.Thread(target=enrich_loop, daemon=True).start()
     if SHEET_STATUS["on"]:
         threading.Thread(target=sheet_loop, daemon=True).start()
         log("sheet: LinkedIn people go to the Google Sheet every %ds" % SHEET_EVERY_S)
