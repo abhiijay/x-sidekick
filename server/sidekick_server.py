@@ -84,6 +84,11 @@ EXTRA_ORIGINS = tuple(o.strip().rstrip("/") for o in env("SIDEKICK_ALLOWED_ORIGI
 
 ARMORY_URL = env("ARMORY_URL").rstrip("/")
 ARMORY_USER = env("ARMORY_USER")
+# DataForSEO login, used only for the one-question ChatGPT check a write job may
+# ask for (see chatgpt_ask). Optional: without it that check is simply off.
+DFS_LOGIN = env("DATAFORSEO_LOGIN")
+DFS_PASSWORD = env("DATAFORSEO_PASSWORD")
+ASK_PER_LEAD = 2            # buyer questions one write job may ask per person
 ARMORY_PASS = env("ARMORY_PASS")
 ARMORY_PASSTHROUGH = env("ARMORY_PASSTHROUGH").rstrip("/")
 
@@ -1442,12 +1447,105 @@ def start_write_job(body):
     return 200, {"ok": True, "job": jobs[0], "jobs": jobs, "leads": len(todo)}
 
 
+class AskError(Exception):
+    pass
+
+
+def ask_configured():
+    return bool(DFS_LOGIN and DFS_PASSWORD)
+
+
+def chatgpt_ask(question, timeout=150):
+    """One buyer question put to ChatGPT's web app (signed out, US, English)
+    through DataForSEO's ChatGPT scraper. Returns the brands it named, in order,
+    and the answer text. Costs a few cents, so callers cap how often it runs."""
+    if not ask_configured():
+        raise AskError("ChatGPT check is off (DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD not set)")
+    auth = base64.b64encode(("%s:%s" % (DFS_LOGIN, DFS_PASSWORD)).encode()).decode()
+    body = json.dumps([{"keyword": question, "location_code": 2840, "language_code": "en"}]).encode()
+    req = urllib.request.Request("https://api.dataforseo.com/v3/ai_optimization/chat_gpt/llm_scraper/live/advanced",
+                                 data=body, method="POST")
+    req.add_header("Authorization", "Basic " + auth)
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            resp = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise AskError("ChatGPT check failed %s: %s" % (e.code, e.read().decode("utf-8", "replace")[:200]))
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as e:
+        raise AskError("ChatGPT check failed: %s" % e)
+    task = (resp.get("tasks") or [{}])[0]
+    result = (task.get("result") or [{}])[0] or {}
+    items = result.get("items") or []
+    if task.get("status_code") != 20000 or not items:
+        raise AskError("ChatGPT gave no answer: %s" % (task.get("status_message") or "empty result"))
+    brands, text, sources = [], [], []
+    for it in items:
+        if it.get("type") in ("chat_gpt_text", "chat_gpt_table") and it.get("markdown"):
+            text.append(it["markdown"])
+        for b in it.get("brand_entities") or []:
+            name = str(b.get("markdown") or "").strip()
+            if name and name not in brands:
+                brands.append(name)
+        for src in it.get("sources") or []:
+            if src.get("domain") and src["domain"] not in sources:
+                sources.append(src["domain"])
+    return {"brands": brands[:12], "answer": re.sub(r"\\(.)", r"\1", "".join(text)).strip()[:6000],
+            "sources": sources[:20]}
+
+
+def agent_ask(job, body):
+    """A write job asks ChatGPT one buyer question about one of its own leads.
+    The answer is kept on the lead, so a rewrite reads it instead of paying again."""
+    lead_id, question = body.get("lead_id"), " ".join(str(body.get("question") or "").split())[:200]
+    if lead_id not in set(job["payload"].get("lead_ids") or []):
+        return 403, {"error": "lead is not in this job"}
+    if len(question) < 12:
+        return 400, {"error": "question required: one buyer question, without the product name"}
+    with LOCK:
+        lead = next((l for l in load_dm_leads() if l.get("id") == lead_id), None)
+        if not lead:
+            return 404, {"error": "lead not found"}
+        done = lead.get("research") or []
+        same = next((r for r in done if r.get("question", "").lower() == question.lower()), None)
+    if same:
+        return 200, {"ok": True, "cached": True, "research": same}
+    if len(done) >= ASK_PER_LEAD:
+        return 429, {"error": "already asked %d questions for this person" % len(done), "research": done}
+    try:
+        got = chatgpt_ask(question)
+    except AskError as e:
+        return 502, {"error": str(e)}
+    product = str(lead.get("product") or "").split(" | ")[0].split(" - ")[0].strip()
+    hay = got["answer"].lower() + " " + " ".join(got["brands"]).lower()
+    rec = {"engine": "ChatGPT", "how": "ChatGPT web app, signed out, United States, asked through DataForSEO",
+           "asked_ts": now_str(), "question": question, "brands": got["brands"],
+           "product_named": bool(product) and bool(re.search(
+               r"(?<![a-z0-9])" + re.escape(product.lower()) + r"(?![a-z0-9])", hay)),
+           "product_checked_as": product, "sources": got["sources"], "answer": got["answer"][:3000]}
+    with LOCK:  # the outside call ran unlocked; re-read before saving
+        leads = load_dm_leads()
+        lead = next((l for l in leads if l.get("id") == lead_id), None)
+        if lead is not None:
+            lead["research"] = (lead.get("research") or []) + [rec]
+            lead["updated_ts"] = now_str()
+            save_dm_leads(leads)
+    return 200, {"ok": True, "research": rec}
+
+
 def dm_payload_for_write(job):
     ids = set(job["payload"].get("lead_ids") or [])
     keep = ("id", "channel", "campaign", "name", "handle", "profile_url", "product", "tagline", "site",
             "headline", "meta", "flag", "note", "icp", "tier", "fields", "reply_text", "context",
-            "fix_note", "previous_text")
-    leads = [{k: l[k] for k in keep if l.get(k)} for l in load_dm_leads() if l.get("id") in ids]
+            "fix_note", "previous_text", "research")
+    leads = []
+    for l in load_dm_leads():
+        if l.get("id") in ids:
+            row = {k: l[k] for k in keep if l.get(k)}
+            # Tells the routine a report PDF is already on the card.
+            row["has_report"] = any("report" in str(a.get("label") or a.get("file") or "").lower()
+                                    for a in l.get("attachments") or [])
+            leads.append(row)
     camps = load_dm_campaigns()
     used = {l.get("campaign") for l in leads}
     sends = _load(DM_SENDS_FILE, "sends")
@@ -1463,6 +1561,9 @@ def dm_payload_for_write(job):
             "feedback": [{k: n.get(k) for k in ("ts", "text", "campaign", "lead", "message") if n.get(k)}
                          for n in load_dm_feedback()
                          if not n.get("campaign") or n.get("campaign") in used][:DM_FEEDBACK_SENT],
+            # One real ChatGPT answer per buyer question, kept on the lead as `research`.
+            "ask": {"on": ask_configured(), "per_lead": ASK_PER_LEAD,
+                    "post_to": "/agent/job/%s/ask" % job["id"]},
             "write_to": "/agent/job/%s/dmwrite" % job["id"]}
 
 
@@ -3529,7 +3630,7 @@ class AppHandler(BaseHandler):
                     with LOCK:
                         h = health_counts()
                         dm = dm_stats(load_dm_leads(), load_dm_state())
-                    h.update(armory=armory_configured(), routine=routine_configured(),
+                    h.update(armory=armory_configured(), routine=routine_configured(), ask=ask_configured(),
                              watchlist=len(parse_watchlist()[0]),
                              sends=len(load_sends()),
                              rejects=len(_load(REJECTS_FILE, "rejects")),
@@ -3698,7 +3799,7 @@ class AppHandler(BaseHandler):
 
     # ---- Claude callbacks (per-job token)
     def _agent(self, method, path):
-        m = re.match(r"^/agent/job/(job_[a-f0-9]{10})(?:/(drafts|scout|leads|dmwrite|done|rules|file))?$", path)
+        m = re.match(r"^/agent/job/(job_[a-f0-9]{10})(?:/(drafts|scout|leads|dmwrite|ask|done|rules|file))?$", path)
         am = re.match(r"^/agent/armory/(job_[a-f0-9]{10})(/twitter/[a-z/]+)$", path)
         job_id = (m or am).group(1) if (m or am) else None
         job = get_job(job_id) if job_id else None
@@ -3743,6 +3844,8 @@ class AppHandler(BaseHandler):
                 return self._json(*agent_write_leads(job, body))
             if action == "dmwrite" and job["kind"] == "dmwrite":
                 return self._json(*agent_write_dm(job, body))
+            if action == "ask" and job["kind"] == "dmwrite":
+                return self._json(*agent_ask(job, body))
             if action == "done":
                 if job["kind"] == "draft":
                     with LOCK:  # release anything Claude did not write back

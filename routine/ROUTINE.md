@@ -437,4 +437,23 @@ POST {base_url}/agent/job/{job_id}/dmwrite
 ```
 
    At most 3 variants per lead. The phone shows one and Shuffle flips to the next.
+
+   **Asking ChatGPT (only when the payload's `ask.on` is true and the campaign
+   rules call for it).** A lead's `research` lists answers already on file; use
+   those first. To get a new one:
+
+   ```
+   POST {base_url}/agent/job/{job_id}/ask
+   {"lead_id": "<lead id>", "question": "best <category> for <use case>"}
+   ```
+
+   It puts that one question to ChatGPT's web app (signed out, United States)
+   and returns `research`: `question`, `brands` (the names ChatGPT gave, in
+   order), `product_named`, `answer`. At most `ask.per_lead` questions per
+   person, and each costs money, so ask only what a message will quote. Write
+   the question the way a buyer would type it, from the lead's own tagline and
+   site, without the product name. Read `answer` yourself before saying whether
+   the product was named: `product_named` is a plain text match. A message may
+   only quote a question and names that are in `research`, word for word. If
+   `ask.on` is false or the call fails, claim no result at all.
 5. `POST {base_url}/agent/job/{job_id}/done` with `{"report": "wrote N, skipped M (why)"}`.
