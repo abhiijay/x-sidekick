@@ -1999,7 +1999,9 @@ def fire_routine(job, token):
     pointer + a one-job token; Claude pulls the payload from /agent/job/<id>."""
     if not routine_configured():
         update_job(job["id"], status="failed",
-                   error="Claude routine not configured (ROUTINE_FIRE_URL / ROUTINE_TOKEN / SIDEKICK_PUBLIC_URL)")
+                   error="Claude steps run on the other device's server. Open the app at that address for this."
+                   if PEER_URL and ROUTINE_FIRE_URL and ROUTINE_TOKEN else
+                   "Claude routine not configured (ROUTINE_FIRE_URL / ROUTINE_TOKEN / SIDEKICK_PUBLIC_URL)")
         return False
     text = (
         "SIDEKICK JOB\n"
@@ -3002,6 +3004,12 @@ class AppHandler(BaseHandler):
                             # so it does not fall back to raw unranked candidates.
                             run["shortlist_done"] = had_shortlist and not run["shortlist"]
                     job = get_job(run["job_id"]) if run else None
+                    if run and job and job.get("status") == "failed" and not run.get("shortlist") \
+                            and not run.get("shortlist_done"):
+                        # Claude never ranked this run. Offer only as many as he asked
+                        # for (best by the server's own order), not the whole pool.
+                        run["candidates"] = run["candidates"][:clamp_int(run.get("want"), 1, 60, 20)]
+                        run["unranked"] = True
                     return self._json(200, {"run": run, "job": public_job(job) if job else None})
                 return self._json(404, {"error": "not found"})
             if path == "/api/share":

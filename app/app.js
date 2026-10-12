@@ -825,7 +825,9 @@ function renderScout() {
   const bits = [];
   if (job) bits.push((SCOUT_STATUS[job.status] || job.status) + (job.progress && running ? ' · ' + job.progress : '') + ' · ' + agoText(job.ts));
   if (run && run.credits_remaining != null) bits.push(num(run.credits_remaining) + ' credits left');
-  $('scoutStatus').textContent = job && job.error ? 'Failed: ' + job.error : bits.join(' · ');
+  $('scoutStatus').textContent = job && job.error
+    ? (run && run.unranked ? 'Not ranked by Claude, showing the top ' + (run.candidates || []).length + '. ' : 'Failed: ') + job.error
+    : bits.join(' · ');
 
   const all = scoutRows();
   const gapCount = all.filter((c) => c.high_view_low_eng).length;
