@@ -396,6 +396,18 @@ function updateDraftAll() {
     : 'Nothing waiting';
 }
 
+/* For a reply someone left for him: what it was answering. */
+function contextBlock(it) {
+  const c = it.context;
+  if (!c || !c.text) return [];
+  return [el('div', { class: 'quote ctx' },
+    el('b', { text: c.mine ? 'You said' : '@' + handleOf(c.author) + ' said' }),
+    el('div', { text: c.text }))];
+}
+function mentionTag(it) {
+  return it.source === 'mention' ? [el('div', { class: 'tag-row' }, el('span', { class: 'tag', text: 'Replied to you' }))] : [];
+}
+
 function itemMenu(it) {
   const h = handleOf(it.author);
   const actions = [];
@@ -459,7 +471,7 @@ function retryDraft(it) {
 function draftCard(it, opts = {}) {
   const card = el('div', { class: 'card' + (opts.focus ? ' focus-card' : '') },
     whoRow(it.author, ago(it.ts) + (it.author_followers ? ' · ' + num(it.author_followers) + ' followers' : ''), () => itemMenu(it)),
-    postBlock(postText(it), 'post open'), ...postExtras(it));
+    ...mentionTag(it), ...contextBlock(it), postBlock(postText(it), 'post open'), ...postExtras(it));
   // The take the drafts were written from. If he has changed it since, Retry uses the new one.
   const usedTake = it.take_used || it.take;
   if (usedTake) card.append(el('div', { class: 'take-used' }, el('b', { text: 'Your take: ' }), el('span', { text: usedTake })));
@@ -656,7 +668,7 @@ function waitingCard(it) {
     // Only while that run is really going: a failed run used to leave this label on forever.
     whoRow(it.author, it.drafting_job && activeJobs('draft').some((j) => j.id === it.drafting_job) ? 'Claude is drafting…' : ago(it.ts), () => itemMenu(it)),
     // The whole post, never a preview: he is giving his opinion on it here.
-    postBlock(postText(it), 'post open'), ...postExtras(it));
+    ...mentionTag(it), ...contextBlock(it), postBlock(postText(it), 'post open'), ...postExtras(it));
   if (postUrl(it)) card.append(el('a', { class: 'link open-x', href: postUrl(it), target: '_blank', rel: 'noopener', text: 'Open on X' }));
   if (it.retry_note) card.append(el('div', { class: 'flag' }, el('b', { text: '↻' }), el('span', { text: 'Redo: ' + it.retry_note })));
   if (it.agent_note) card.append(el('div', { class: 'flag' }, el('b', { text: '!' }), el('span', { text: it.agent_note })));
@@ -744,6 +756,19 @@ async function askDraft(ids, btn) {
 }
 
 $('draftAllBtn').addEventListener('click', (e) => askDraft(null, e.target));
+/* Replies people left for him that he has not answered. They join Waiting like
+ * any other post, marked so he can see what they were answering. */
+$('mentionsBtn').addEventListener('click', async (e) => {
+  const done = busy(e.target, 'Checking…');
+  try {
+    const r = await api('/api/mentions/check', {});
+    const sk = r.skipped || {};
+    toast(r.added ? r.added + ' new ' + (r.added === 1 ? 'reply' : 'replies') + ' to you added to Waiting'
+      : 'Nothing new. ' + (sk.answered || 0) + ' already answered, ' + (sk.old || 0) + ' older than a week.');
+    await refresh();
+  } catch (err) { toast(err.message, true); }
+  done();
+});
 $('clearDoneBtn').addEventListener('click', async () => {
   try { const r = await api('/api/queue/clear-done', {}); toast('Removed ' + r.removed); refresh(); } catch (e) { toast(e.message, true); }
 });

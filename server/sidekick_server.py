@@ -1653,6 +1653,113 @@ def reply_log_merge(name, entries):
     return new
 
 
+# The reply queue itself. It lived separately on each device, so a post queued
+# or a take typed on one was invisible on the other, and the Mac could not hand
+# a post to the phone's Claude runs. Each item carries `mod`, the time it last
+# changed; the newer copy wins whole.
+QUEUE_SHA_FILE = os.path.join(DATA_DIR, "queue-shas.json")
+QUEUE_LOCAL_FIELDS = ("drafting_job", "mod")     # never compared, never sent
+QUEUE_SYNC_DAYS = 7                               # finished posts older than this stay put
+QUEUE_SYNC_CHUNK = 25
+
+
+def _item_sha(i):
+    body = {k: v for k, v in i.items() if k not in QUEUE_LOCAL_FIELDS}
+    return hashlib.sha1(json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:12]
+
+
+def _load_shas():
+    try:
+        with open(QUEUE_SHA_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _save_shas(shas):
+    tmp = QUEUE_SHA_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(shas, f)
+    os.replace(tmp, QUEUE_SHA_FILE)
+
+
+def stamp_queue():
+    """Give every changed item a fresh `mod`. Returns the items. Call under LOCK.
+
+    Compared against a fingerprint kept beside the queue, so an edit made
+    straight to the file (Cowork writes drafts that way) is noticed too.
+    """
+    items, shas = load_queue(), _load_shas()
+    first, now, new, dirty = shas is None, now_str(), {}, False
+    for i in items:
+        if not i.get("id"):
+            continue
+        h = _item_sha(i)
+        new[i["id"]] = h
+        if first:
+            if not i.get("mod"):    # first run: its own history, so neither device wins by accident
+                i["mod"] = max(str(i.get(k) or "") for k in ("ts", "drafted_ts", "posted_ts"))
+                dirty = True
+        elif shas.get(i["id"]) != h or not i.get("mod"):
+            i["mod"] = now
+            dirty = True
+    if dirty:
+        _save(QUEUE_FILE, items[:MAX_ITEMS])
+    if first or new != shas:
+        _save_shas(new)
+    return items
+
+
+def _queue_syncable(i, cutoff):
+    return bool(i.get("id")) and (i.get("status") in ("queued", "drafted") or str(i.get("ts") or "") >= cutoff)
+
+
+def queue_digest():
+    cutoff = (datetime.now() - timedelta(days=QUEUE_SYNC_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    return {i["id"]: i.get("mod") or "" for i in stamp_queue() if _queue_syncable(i, cutoff)}
+
+
+def queue_export(ids):
+    want = set(ids)
+    return [{k: v for k, v in i.items() if k != "drafting_job"} for i in stamp_queue() if i.get("id") in want]
+
+
+def queue_merge(incoming):
+    """Take the other device's newer copies. Returns how many changed here."""
+    changed = 0
+    with LOCK:
+        items = stamp_queue()
+        at = {i.get("id"): n for n, i in enumerate(items)}
+        by_tweet = {i.get("tweet_id"): n for n, i in enumerate(items) if i.get("tweet_id")}
+        for inc in incoming or []:
+            if not isinstance(inc, dict) or not SYNC_ID_RE.match(str(inc.get("id") or "")):
+                continue
+            if inc.get("status") not in ("queued", "drafted", "posted", "skipped"):
+                continue
+            inc = {k: v for k, v in inc.items() if k != "drafting_job"}
+            n = at.get(inc["id"])
+            if n is None and inc.get("tweet_id") in by_tweet:
+                n = by_tweet[inc["tweet_id"]]        # same post queued on both devices: one survives
+            if n is None:
+                at[inc["id"]] = len(items)
+                items.append(inc)
+                changed += 1
+                continue
+            cur = items[n]
+            if str(inc.get("mod") or "") <= str(cur.get("mod") or ""):
+                continue
+            if cur.get("drafting_job"):
+                inc["drafting_job"] = cur["drafting_job"]
+            items[n] = inc
+            changed += 1
+        if changed:
+            items.sort(key=lambda i: str(i.get("ts") or ""), reverse=True)
+            _save(QUEUE_FILE, items[:MAX_ITEMS])
+            _save_shas({i["id"]: _item_sha(i) for i in items if i.get("id")})
+    return changed
+
+
 def sync_digest():
     with LOCK:
         leads = {l["id"]: lead_version(l) for l in load_dm_leads()
@@ -1662,14 +1769,19 @@ def sync_digest():
                 "docs": {name: doc_stamp(name) for name in SYNC_DOCS},
                 "touched": {"n": len(flat), "sha": hashlib.sha1("\n".join(flat).encode("utf-8")).hexdigest()[:16]},
                 "feedback": len(load_dm_feedback()),
-                "reply_logs": {name: reply_log_stamp(name) for name in REPLY_LOGS}}
+                "reply_logs": {name: reply_log_stamp(name) for name in REPLY_LOGS},
+                "queue": queue_digest()}
 
 
 def sync_get(body):
     ids = [i for i in (body.get("ids") or []) if isinstance(i, str)][:50]
     with LOCK:
         want = set(ids)
-        return 200, {"leads": [l for l in load_dm_leads() if l.get("id") in want]}
+        out = {"leads": [l for l in load_dm_leads() if l.get("id") in want]}
+        qids = [i for i in (body.get("queue_ids") or []) if isinstance(i, str)][:QUEUE_SYNC_CHUNK]
+        if qids:
+            out["queue"] = queue_export(qids)
+        return 200, out
 
 
 def sync_merge(incoming):
@@ -1741,6 +1853,8 @@ def sync_put(body):
     for name, entries in (body.get("reply_logs") or {}).items():
         if name in REPLY_LOGS and isinstance(entries, list):
             out.setdefault("reply_logs", {})[name] = reply_log_merge(name, entries)
+    if isinstance(body.get("queue"), list):
+        out["queue"] = queue_merge(body["queue"])
     return 200, out
 
 
@@ -1834,6 +1948,18 @@ def peer_sync_once():
             rows = list(reply_log(name))
         for n in range(0, len(rows), REPLY_LOG_PAGE):
             peer_call("/api/sync/put", {"reply_logs": {name: rows[n:n + REPLY_LOG_PAGE]}})
+
+    tq, mq = theirs.get("queue"), mine["queue"]
+    if isinstance(tq, dict):                      # absent on a peer running older code
+        qneed = [i for i, m in tq.items() if str(m or "") > str(mq.get(i) or "") or i not in mq]
+        qgive = [i for i, m in mq.items() if str(m or "") > str(tq.get(i) or "") or i not in tq]
+        for n in range(0, len(qneed), QUEUE_SYNC_CHUNK):
+            got = peer_call("/api/sync/get", {"queue_ids": qneed[n:n + QUEUE_SYNC_CHUNK]})
+            queue_merge(got.get("queue"))
+        for n in range(0, len(qgive), QUEUE_SYNC_CHUNK):
+            with LOCK:
+                rows = queue_export(qgive[n:n + QUEUE_SYNC_CHUNK])
+            peer_call("/api/sync/put", {"queue": rows})
     return pulled, pushed
 
 
@@ -2077,6 +2203,88 @@ def enrich_loop():
         except Exception as e:
             log("enrich failed: %r" % e)
         time.sleep(45)
+
+
+# Replies people leave for him. A reply under his own post or reply is the
+# warmest target there is, and none of them reached the queue: Scout only looks
+# at other people's posts.
+MY_HANDLE = env("SIDEKICK_X_HANDLE", "abhiijayVinayak").lstrip("@")
+MENTION_DAYS = max(1, int(env("SIDEKICK_MENTION_DAYS", "7") or 7))
+
+
+def check_mentions(body=None):
+    """Queue the replies to him that he has not answered yet. Returns (code, payload).
+
+    Two Armory calls: who replied to him, and his own recent tweets (to see what
+    they were answering and which ones he already replied to). About 800 credits.
+    """
+    me = MY_HANDLE.lower()
+    try:
+        got = armory("/twitter/user/mentions", {"handle": MY_HANDLE, "max_items": 40}).get("tweets") or []
+        mine = armory("/twitter/user/tweets", {"handle": MY_HANDLE, "max_items": 40,
+                                               "include_replies": True}).get("tweets") or []
+    except ArmoryError as e:
+        return 502, {"error": str(e)}
+    mine_by_id = {str(t.get("id")): t for t in mine}
+    answered = {str(t.get("in_reply_to_id")) for t in mine if t.get("in_reply_to_id")}
+    cutoff = datetime.now(timezone.utc) - timedelta(days=MENTION_DAYS)
+    blocked = blocked_set()
+    with LOCK:
+        have = {i.get("tweet_id") for i in load_queue()}
+    fresh, why = [], {"old": 0, "answered": 0, "queued": 0, "blocked": 0, "not_to_you": 0}
+    for m in got:
+        mid, who = str(m.get("id") or ""), str(m.get("author") or "")
+        when = parse_x_time(m.get("created_at"))
+        if not mid or who.lower() == me:
+            continue
+        if when and when < cutoff:
+            why["old"] += 1
+        elif mid in answered:
+            why["answered"] += 1
+        elif mid in have:
+            why["queued"] += 1
+        elif handle_key(who) in blocked:
+            why["blocked"] += 1
+        else:
+            fresh.append(m)
+    # What each one was answering. His own tweets are already in hand; anything
+    # else (a reply to someone else that tags him) costs one lookup.
+    need = sorted({str(m.get("in_reply_to_id")) for m in fresh
+                   if m.get("in_reply_to_id") and str(m.get("in_reply_to_id")) not in mine_by_id})
+    if need:
+        try:
+            for t in armory("/twitter/tweet", {"tweets": need[:20]}).get("tweets") or []:
+                mine_by_id[str(t.get("id"))] = t
+        except ArmoryError:
+            pass
+    # A reply to someone else that only tags him is not his to answer.
+    def to_me(m):
+        parent = mine_by_id.get(str(m.get("in_reply_to_id") or ""))
+        return parent is None or str(parent.get("author") or "").lower() == me
+    why["not_to_you"] = sum(1 for m in fresh if not to_me(m))
+    fresh = [m for m in fresh if to_me(m)]
+    added = 0
+    with LOCK:
+        for m in fresh:
+            code, res = queue_add({"platform": "x", "tweet_url": m.get("url"),
+                                   "tweet_text": m.get("text") or "", "author": m.get("author"),
+                                   "author_followers": (m.get("author_profile") or {}).get("followers"),
+                                   "source": "mention", "note": "replied to you"})
+            if code != 200 or res.get("duplicate"):
+                continue
+            parent = mine_by_id.get(str(m.get("in_reply_to_id") or ""))
+            items = load_queue()
+            it = next((i for i in items if i.get("id") == res["id"]), None)
+            if it:
+                it["post_type"] = "conversation"
+                if parent:
+                    it["context"] = {"author": str(parent.get("author") or "")[:60],
+                                     "mine": str(parent.get("author") or "").lower() == me,
+                                     "text": str(parent.get("text") or "")[:1500],
+                                     "url": str(parent.get("url") or "")[:300]}
+                save_queue(items)
+                added += 1
+    return 200, {"ok": True, "added": added, "seen": len(got), "skipped": why}
 
 
 # Paths Claude may reach through /agent/armory/... (read-only research routes).
@@ -2441,6 +2649,32 @@ def voice_examples():
     return out[:VOICE_EXAMPLES]
 
 
+def draft_on_peer(ids, account, note):
+    """This device cannot start Claude runs; the other one can.
+
+    Send it the posts as they are here (with his takes), then ask it to draft.
+    The drafts come back on the next sync.
+    """
+    with LOCK:
+        todo = [i["id"] for i in stamp_queue() if i.get("status") == "queued"
+                and i.get("platform", "x") in ("x", "linkedin") and (not ids or i.get("id") in ids)]
+    if not todo:
+        return 400, {"error": "nothing queued to draft"}
+    try:
+        for n in range(0, len(todo), QUEUE_SYNC_CHUNK):
+            with LOCK:
+                rows = queue_export(todo[n:n + QUEUE_SYNC_CHUNK])
+            ack = peer_call("/api/sync/put", {"queue": rows})
+            if "queue" not in ack:
+                return 502, {"error": "Your other device runs an older Sidekick. Update and restart it, then try again."}
+        res = peer_call("/api/draft", {"ids": todo, "account": account or "", "note": note or ""}, timeout=150, tries=1)
+    except Exception as e:
+        return 502, {"error": "Could not reach your other device to start Claude: %s" % str(e)[:160]}
+    PEER_WAKE.set()
+    res["remote"] = True
+    return 200, res
+
+
 def start_draft_job(ids=None, account=None, note=""):
     """Start drafting, splitting large batches across several routine runs.
 
@@ -2449,6 +2683,8 @@ def start_draft_job(ids=None, account=None, note=""):
     writer has read a single guide. DRAFT_CHUNK keeps each run's payload small
     enough to draft well, and a failure then costs one chunk instead of the batch.
     """
+    if not routine_configured() and PEER_URL:
+        return draft_on_peer(ids, account, note)
     fired = []
     with LOCK:
         items = load_queue()
@@ -3118,7 +3354,7 @@ class AppHandler(BaseHandler):
             time.sleep(0.5)
             return self._json(401, {"error": "wrong or missing password"})
         body = self._body() if method == "POST" else None
-        if method == "POST" and body is None and path not in ("/api/queue/clear-done", "/api/scout"):
+        if method == "POST" and body is None and path not in ("/api/queue/clear-done", "/api/scout", "/api/mentions/check"):
             return self._json(400, {"error": "json body required"})
         body = body or {}
         try:
@@ -3278,6 +3514,8 @@ class AppHandler(BaseHandler):
                 return self._json(*draft_retry_all(body))
             if path == "/api/draft/retry":
                 return self._json(*draft_retry(body))
+            if path == "/api/mentions/check":
+                return self._json(*check_mentions(body))
             if path == "/api/draft/reject":
                 return self._json(*reject_draft(body))
             if path == "/api/scout/dismiss":

@@ -405,3 +405,6 @@ body.with-actionbar { padding-bottom: calc(var(--tabbar) + 84px + env(safe-area-
 }
 
 a.chip { text-decoration: none; display: inline-flex; align-items: center; }
+.quote.ctx { margin: 0 0 8px; background: var(--surface-2); border: 0; }
+.tag-row { margin-bottom: 6px; }
+#mentionsBtn { margin-top: 8px; }
