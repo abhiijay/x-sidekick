@@ -663,7 +663,55 @@ function renderReady(ready, emptyText) {
   setDmActions(state.seg === 'ready' ? card.actions : null);
 }
 
+/* Picking several waiting posts to remove at once. Removed posts go to Done as
+ * skipped, so "Move back to waiting" still brings one back. */
+const wsel = { on: false, ids: new Set() };
+function skippedByClaude(it) { return /^skipped\b/i.test(it.agent_note || ''); }
+function waitingBar(waiting) {
+  if (!waiting.length) return [];
+  if (!wsel.on) {
+    return [el('div', { class: 'view-row' }, el('span', { class: 'spacer' }),
+      el('button', { class: 'pill-chip', text: 'Select', onclick: () => { wsel.on = true; wsel.ids.clear(); renderReplies(); } }))];
+  }
+  const live = new Set(waiting.map((i) => i.id));
+  [...wsel.ids].forEach((id) => { if (!live.has(id)) wsel.ids.delete(id); });
+  const n = wsel.ids.size;
+  const all = n === waiting.length;
+  const flagged = waiting.filter(skippedByClaude);
+  const pick = (list) => { wsel.ids = new Set(list.map((i) => i.id)); renderReplies(); };
+  return [el('div', { class: 'view-row sel-bar' },
+    el('button', { class: 'pill-chip', text: all ? 'Select none' : 'Select all', onclick: () => pick(all ? [] : waiting) }),
+    flagged.length ? el('button', { class: 'pill-chip', text: 'Ones Claude skipped (' + flagged.length + ')', onclick: () => pick(flagged) }) : null,
+    el('span', { class: 'spacer' }),
+    el('button', { class: 'pill-chip', text: 'Cancel', onclick: () => { wsel.on = false; wsel.ids.clear(); renderReplies(); } }),
+    el('button', { class: 'pill-chip warn', text: n ? 'Remove ' + n : 'Remove', disabled: !n, onclick: (e) => removeSelected(e.target) }))];
+}
+async function removeSelected(btn) {
+  const ids = [...wsel.ids];
+  if (!ids.length) return;
+  const done = busy(btn, 'Removing…');
+  let ok = 0;
+  try {
+    // One at a time: each update rewrites the queue file.
+    for (const id of ids) { await api('/api/queue/update', { id, status: 'skipped' }); wsel.ids.delete(id); ok++; }
+    toast('Removed ' + ok + '. They are in Done if you want one back.');
+    wsel.on = false;
+  } catch (e) { toast((ok ? 'Removed ' + ok + ', then stopped: ' : '') + e.message, true); }
+  done();
+  await refresh();
+}
+
 function waitingCard(it) {
+  if (wsel.on) {
+    const on = wsel.ids.has(it.id);
+    const card = el('div', { class: 'card pickable' + (on ? ' picked' : ''), role: 'checkbox', 'aria-checked': String(on),
+      onclick: () => { if (wsel.ids.has(it.id)) wsel.ids.delete(it.id); else wsel.ids.add(it.id); renderReplies(); } },
+      el('div', { class: 'who' }, el('span', { class: 'pick-box', text: on ? '✓' : '' }),
+        el('div', { class: 'who-name' }, el('b', { text: it.author ? '@' + handleOf(it.author) : 'post' }), el('span', { text: ago(it.ts) }))),
+      el('div', { class: 'post', text: postText(it) || 'Text not fetched yet.' }));
+    if (it.agent_note) card.append(el('div', { class: 'flag' }, el('b', { text: '!' }), el('span', { text: it.agent_note })));
+    return card;
+  }
   const card = el('div', { class: 'card' },
     // Only while that run is really going: a failed run used to leave this label on forever.
     whoRow(it.author, it.drafting_job && activeJobs('draft').some((j) => j.id === it.drafting_job) ? 'Claude is drafting…' : ago(it.ts), () => itemMenu(it)),
@@ -712,7 +760,9 @@ function renderReplies() {
     box.replaceChildren(...(list.length ? list.map(fn) : [el('div', { class: 'empty', text: emptyText })]));
   };
   renderReady(ready, job && ACTIVE.includes(job.status) ? 'Drafts will show up here in a few minutes.' : 'No drafts yet. Share a post from X, or run Scout.');
+  if (!waiting.length) { wsel.on = false; wsel.ids.clear(); }
   fill('waitingList', waiting, waitingCard, 'Nothing waiting.');
+  $('waitingList').prepend(...waitingBar(waiting).filter(Boolean));
   fill('doneList', done, doneRow, 'Nothing here yet.');
 }
 
