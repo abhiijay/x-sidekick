@@ -1220,11 +1220,8 @@ function paceState(ch, mode = modeOf(ch)) {
 function paceGate(ch, mode = modeOf(ch)) {
   const p = paceState(ch, mode);
   if (p.cool) return { title: DM_NAME[ch] + ' blocked a send. Sending during the cooldown risks a longer block or a label.', go: 'Send anyway' };
-  if (p.capped) {
-    return mode === 'connect'
-      ? { title: "That's your connection-request cap for today. LinkedIn signed you out after about 82 in one day on Sep 28.", go: 'Open anyway' }
-      : { title: "That's your daily cap. More today raises the spam risk.", go: 'Send anyway' };
-  }
+  // Connect requests past the cap open straight away: the pill already says the cap is reached.
+  if (p.capped) return mode === 'connect' ? null : { title: "That's your daily cap. More today raises the spam risk.", go: 'Send anyway' };
   if (p.sessionDone) return { title: 'You planned ' + sessionOf(ch, mode).target + ' for this session and they are done.', go: 'Keep going' };
   if (p.wait) return { title: 'The next one is due in ' + mmss(p.wait) + '. The random gap keeps this looking human.', go: 'Send early' };
   return null;
