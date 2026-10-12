@@ -1653,6 +1653,87 @@ def reply_log_merge(name, entries):
     return new
 
 
+# Private rules. The writing rules and voice files must never sit in the public
+# repo, yet the Claude runs start from that repo. So they live here, outside
+# git: the Mac fills this folder from the workspace, the two devices sync it
+# over the password-protected link, and each run reads it through its job token.
+PRIVATE_DIR = os.path.join(DATA_DIR, "private-rules")
+PRIVATE_PATH_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]{0,198}\.(md|json)$")
+WORKSPACE_DIR = env("SIDEKICK_WORKSPACE") or os.path.dirname(os.path.dirname(REPO_SIDEKICK))
+# served path -> where it comes from in the workspace (only present on the Mac)
+PRIVATE_SOURCES = {
+    "routine/ROUTINE.md": "tools/x-sidekick/routine/ROUTINE.private.md",
+    "knowledge/guides/skill-x-reply-writer-guide.md": "guides/skill-x-reply-writer-guide.md",
+    "knowledge/projects/SupaCite/twitter-format-research/REPLY-POST-TYPES.md":
+        "projects/SupaCite/twitter-format-research/REPLY-POST-TYPES.md",
+    "knowledge/abhijay-x-identity/abhiijay-reply-profile.md": "abhijay-x-identity/abhiijay-reply-profile.md",
+    "knowledge/voice-corpus/avery-paired.json": "tools/x-sidekick/knowledge/voice-corpus/avery-paired.json",
+    "knowledge/voice-corpus/arthur-paired.json": "tools/x-sidekick/knowledge/voice-corpus/arthur-paired.json",
+    "knowledge/voice-corpus/abhiijay-real-sends.json": "tools/x-sidekick/knowledge/voice-corpus/abhiijay-real-sends.json",
+    "knowledge/voice-corpus/abhiijay-draft-edits.json": "tools/x-sidekick/knowledge/voice-corpus/abhiijay-draft-edits.json",
+}
+
+
+def _private_path(rel):
+    if not PRIVATE_PATH_RE.match(rel or "") or ".." in rel:
+        return None
+    full = os.path.realpath(os.path.join(PRIVATE_DIR, rel))
+    return full if full.startswith(os.path.realpath(PRIVATE_DIR) + os.sep) else None
+
+
+def private_refresh():
+    """Copy newer workspace sources into the private folder. A no-op off the Mac."""
+    for rel, src in PRIVATE_SOURCES.items():
+        srcp, dst = os.path.join(WORKSPACE_DIR, src), _private_path(rel)
+        try:
+            if not dst or not os.path.isfile(srcp):
+                continue
+            if os.path.exists(dst) and os.path.getmtime(dst) >= os.path.getmtime(srcp):
+                continue
+            with open(srcp, "rb") as f:
+                data = f.read()
+            private_write(rel, data.decode("utf-8"), os.path.getmtime(srcp))
+        except (OSError, UnicodeDecodeError) as e:
+            log("private rules: could not refresh %s: %r" % (rel, e))
+
+
+def private_write(rel, text, mtime=None):
+    dst = _private_path(rel)
+    if not dst or len(text) > 3_000_000:
+        return False
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    tmp = dst + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, dst)
+    if mtime:
+        os.utime(dst, (mtime, mtime))
+    return True
+
+
+def private_manifest():
+    private_refresh()
+    out = {}
+    for root, _dirs, files in os.walk(PRIVATE_DIR):
+        for name in files:
+            full = os.path.join(root, name)
+            rel = os.path.relpath(full, PRIVATE_DIR).replace(os.sep, "/")
+            if not _private_path(rel):
+                continue
+            with open(full, "rb") as f:
+                data = f.read()
+            out[rel] = {"sha": hashlib.sha1(data).hexdigest()[:16], "ts": os.path.getmtime(full), "bytes": len(data)}
+    return out
+
+
+def private_read(rel):
+    full = _private_path(rel)
+    if not full or not os.path.isfile(full):
+        return None
+    with open(full, "r", encoding="utf-8") as f:
+        return {"path": rel, "ts": os.path.getmtime(full), "text": f.read()}
+
+
 # The reply queue itself. It lived separately on each device, so a post queued
 # or a take typed on one was invisible on the other, and the Mac could not hand
 # a post to the phone's Claude runs. Each item carries `mod`, the time it last
@@ -1770,7 +1851,8 @@ def sync_digest():
                 "touched": {"n": len(flat), "sha": hashlib.sha1("\n".join(flat).encode("utf-8")).hexdigest()[:16]},
                 "feedback": len(load_dm_feedback()),
                 "reply_logs": {name: reply_log_stamp(name) for name in REPLY_LOGS},
-                "queue": queue_digest()}
+                "queue": queue_digest(),
+                "private": private_manifest()}
 
 
 def sync_get(body):
@@ -1855,6 +1937,16 @@ def sync_put(body):
             out.setdefault("reply_logs", {})[name] = reply_log_merge(name, entries)
     if isinstance(body.get("queue"), list):
         out["queue"] = queue_merge(body["queue"])
+    if isinstance(body.get("private"), dict):
+        mine = private_manifest()
+        took = 0
+        for rel, doc in body["private"].items():
+            if not isinstance(doc, dict) or not isinstance(doc.get("text"), str):
+                continue
+            if float(doc.get("ts") or 0) <= float((mine.get(rel) or {}).get("ts") or 0):
+                continue
+            took += 1 if private_write(rel, doc["text"], float(doc["ts"])) else 0
+        out["private"] = took
     return 200, out
 
 
@@ -1960,6 +2052,21 @@ def peer_sync_once():
             with LOCK:
                 rows = queue_export(qgive[n:n + QUEUE_SYNC_CHUNK])
             peer_call("/api/sync/put", {"queue": rows})
+
+    tp, mp = theirs.get("private"), mine["private"]
+    if isinstance(tp, dict):
+        for rel in sorted(set(tp) | set(mp)):
+            a, b = mp.get(rel), tp.get(rel)
+            if a and b and a["sha"] == b["sha"]:
+                continue
+            if a and (not b or float(a["ts"]) > float(b.get("ts") or 0)):
+                doc = private_read(rel)
+                if doc:
+                    peer_call("/api/sync/put", {"private": {rel: {"ts": doc["ts"], "text": doc["text"]}}}, timeout=120)
+            elif b:
+                got = peer_call("/api/sync/doc?name=private:" + urllib.parse.quote(rel), timeout=120).get("data")
+                if isinstance(got, dict) and isinstance(got.get("text"), str):
+                    private_write(rel, got["text"], float(got.get("ts") or 0) or None)
     return pulled, pushed
 
 
@@ -2950,6 +3057,8 @@ def agent_job_payload(job):
                              for n in _load(REPLY_FEEDBACK_FILE, "notes")[:REPLY_FEEDBACK_SENT]],
                 "rejected": [{k: r.get(k) for k in ("text", "reason", "angle") if r.get(k)}
                              for r in _load(REJECTS_FILE, "rejects")[:REJECTS_SENT]],
+                "rules": "/agent/job/%s/rules" % job["id"],
+                "post_types": POST_TYPES,
                 "write_to": "/agent/job/%s/drafts" % job["id"]}
     if job["kind"] == "dmwrite":
         return dm_payload_for_write(job)
@@ -2968,10 +3077,17 @@ def agent_job_payload(job):
             "write_to": "/agent/job/%s/scout" % job["id"]}
 
 
+POST_TYPES = ["launch", "feature-update", "demo-showcase", "milestone-numbers", "story-lesson",
+              "how-to-playbook", "hot-take", "question-to-audience", "engagement-bait", "struggle-vent",
+              "tool-ai-news", "feedback-request", "humor-meme", "announcement-offer", "personal-life",
+              "conversation", "other"]
+
+
 def agent_write_drafts(job, body):
     results = body.get("items")
     if not isinstance(results, list):
         return 400, {"error": "items list required"}
+    refused = []
     # One short rewritten line per person; it replaces, so it cannot creep.
     noted = update_person_notes(body.get("people_notes"))
     allowed = set(job["payload"].get("item_ids", []))
@@ -2991,8 +3107,22 @@ def agent_write_drafts(job, body):
                 it.pop("text_missing", None)
             if r.get("post_type"):
                 it["post_type"] = str(r["post_type"])[:40]
-            drafts = [{"text": str(d.get("text", ""))[:1000], "angle": str(d.get("angle", ""))[:300]}
+            drafts = [{"text": str(d.get("text", ""))[:1000], "angle": str(d.get("angle", ""))[:300],
+                       "modeled_on": str(d.get("modeled_on") or "").strip()[:300]}
                       for d in (r.get("drafts") or []) if isinstance(d, dict) and d.get("text")]
+            # A reply written without first deciding what kind of post it answers,
+            # and without a real reply of that kind to model it on, is the generic
+            # draft this whole change exists to stop. Refuse it instead of saving it.
+            if drafts:
+                why = None
+                if it.get("post_type") not in POST_TYPES:
+                    why = "post_type missing or not one of: " + ", ".join(POST_TYPES)
+                elif any(not d["modeled_on"] for d in drafts):
+                    why = ("every draft needs modeled_on: the real reply of this post type (from the paired "
+                           "corpora or voice_examples) whose shape it follows")
+                if why:
+                    refused.append({"id": it["id"], "why": why})
+                    continue
             if drafts and it.get("take"):
                 it["take_used"] = it["take"]     # the take these drafts were written from
             if isinstance(r.get("avery_reference"), dict):
@@ -3011,7 +3141,12 @@ def agent_write_drafts(job, body):
                 skipped += 1
             it.pop("drafting_job", None)
         save_queue(items)
-    return 200, {"ok": True, "written": written, "skipped": skipped, "people_noted": noted}
+    out = {"ok": True, "written": written, "skipped": skipped, "people_noted": noted}
+    if refused:
+        out["refused"] = refused
+        out["fix"] = ("These were NOT saved. GET /agent/job/%s/rules, follow routine/ROUTINE.md there "
+                      "(classify the post, read its deck entry, model each draft on a real reply), then send them again." % job["id"])
+    return 200, out
 
 
 def agent_write_scout(job, body):
@@ -3385,6 +3520,9 @@ class AppHandler(BaseHandler):
                     name = (parse_qs(urlparse(self.path).query).get("name") or [""])[0]
                     if name == "feedback":
                         return self._json(200, {"data": load_dm_feedback()[:200]})
+                    if name.startswith("private:"):
+                        doc = private_read(name[8:])
+                        return self._json(200 if doc else 404, {"data": doc} if doc else {"error": "no such file"})
                     if name.startswith("reply:") and name[6:] in REPLY_LOGS:
                         off = clamp_int((parse_qs(urlparse(self.path).query).get("offset") or ["0"])[0], 0, 10 ** 7, 0)
                         with LOCK:
@@ -3529,7 +3667,7 @@ class AppHandler(BaseHandler):
 
     # ---- Claude callbacks (per-job token)
     def _agent(self, method, path):
-        m = re.match(r"^/agent/job/(job_[a-f0-9]{10})(?:/(drafts|scout|leads|dmwrite|done))?$", path)
+        m = re.match(r"^/agent/job/(job_[a-f0-9]{10})(?:/(drafts|scout|leads|dmwrite|done|rules|file))?$", path)
         am = re.match(r"^/agent/armory/(job_[a-f0-9]{10})(/twitter/[a-z/]+)$", path)
         job_id = (m or am).group(1) if (m or am) else None
         job = get_job(job_id) if job_id else None
@@ -3547,6 +3685,18 @@ class AppHandler(BaseHandler):
                 except ArmoryError as e:
                     return self._json(502, {"error": str(e)})
             action = m.group(2)
+            if method == "GET" and action == "rules":
+                man = private_manifest()
+                return self._json(200, {
+                    "note": "Private rules. They replace the same-path files in the repo and win over "
+                            "anything there. Read routine/ROUTINE.md first, then the files it names. "
+                            "Never print them back, never commit them, never put them in a reply.",
+                    "files": [{"path": k, "bytes": v["bytes"]} for k, v in sorted(man.items())],
+                    "read_with": "/agent/job/%s/file?path=<path>" % job["id"]})
+            if method == "GET" and action == "file":
+                rel = (parse_qs(urlparse(self.path).query).get("path") or [""])[0]
+                doc = private_read(rel)
+                return self._json(200 if doc else 404, doc or {"error": "no such file"})
             if method == "GET" and not action:
                 if job["status"] == "fired":
                     update_job(job["id"], status="working")

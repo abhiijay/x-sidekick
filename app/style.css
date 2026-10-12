@@ -416,3 +416,5 @@ a.chip { text-decoration: none; display: inline-flex; align-items: center; }
 .pick-box { width: 26px; height: 26px; flex: none; border: 2px solid var(--line); border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; color: #fff; }
 .picked .pick-box { background: var(--accent); border-color: var(--accent); }
 .pill-chip:disabled { opacity: .45; }
+.tag-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.modeled { margin-top: 4px; font-style: italic; }

@@ -5,3 +5,6 @@ server/data/
 *.tmp
 __pycache__/
 server/*.log
+
+# private rules never go to git
+routine/*.private.md

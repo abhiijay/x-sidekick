@@ -405,7 +405,10 @@ function contextBlock(it) {
     el('div', { text: c.text }))];
 }
 function mentionTag(it) {
-  return it.source === 'mention' ? [el('div', { class: 'tag-row' }, el('span', { class: 'tag', text: 'Replied to you' }))] : [];
+  const tags = [];
+  if (it.source === 'mention') tags.push(el('span', { class: 'tag', text: 'Replied to you' }));
+  if (it.post_type) tags.push(el('span', { class: 'tag', title: 'The kind of post Claude took this to be', text: it.post_type.replace(/-/g, ' ') }));
+  return tags.length ? [el('div', { class: 'tag-row' }, ...tags)] : [];
 }
 
 function itemMenu(it) {
@@ -513,7 +516,9 @@ function draftCard(it, opts = {}) {
 
   const drafts = el('div', { class: 'drafts' });
   (it.drafts || []).forEach((d, idx) => {
-    const angle = el('div', { class: 'angle', text: d.angle || '' });
+    // Why this reply, and the real reply of this post type it was modeled on.
+    const angle = el('div', { class: 'angle' }, el('div', { text: d.angle || '' }),
+      d.modeled_on ? el('div', { class: 'modeled', text: 'Modeled on ' + d.modeled_on }) : null);
     angle.hidden = true;
     const edited = typeof edits[idx] === 'string';
     const txt = el('div', { class: 'draft-text', text: textOf(idx) });
