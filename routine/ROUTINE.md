@@ -438,6 +438,13 @@ POST {base_url}/agent/job/{job_id}/dmwrite
 
    At most 3 variants per lead. The phone shows one and Shuffle flips to the next.
 
+   **Always a no-PDF version too.** When a lead already has a report PDF on the
+   card (`has_report: true`) and you write versions that send the PDF, also
+   write at least one version that works without it, labelled with "no PDF"
+   (e.g. `Casual, no PDF`): same finding, then ask to send the full picture
+   for free instead of attaching it. The server keeps an existing no-PDF
+   version if a new set has none, but write your own when the facts changed.
+
    **Asking ChatGPT (only when the payload's `ask.on` is true and the campaign
    rules call for it).** A lead's `research` lists answers already on file; use
    those first. To get a new one:

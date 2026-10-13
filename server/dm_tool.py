@@ -5,7 +5,7 @@ The phone app's LinkedIn and X DM tabs read dm-leads.json from the sidekick data
 dir. Nothing else writes new leads there: Claude (in Cowork) builds a batch file
 and runs this. It never sends a message; it only edits JSON files.
 
-  python3 dm_tool.py [--data DIR] load BATCH.json [--allow-repeat] [--dry-run]
+  python3 dm_tool.py [--data DIR] load BATCH.json [--allow-repeat] [--messages] [--dry-run]
   python3 dm_tool.py [--data DIR] library LIBRARY.json
   python3 dm_tool.py [--data DIR] export [--since YYYY-MM-DD] [--channel x|linkedin]
                                          [--campaign NAME] [--json]
@@ -67,6 +67,24 @@ CONTENT_FIELDS = ("campaign", "batch", "n", "name", "handle", "recipient_id", "p
 # Carried over only when a lead is first added (history from before the app).
 HISTORY_FIELDS = ("sent_ts", "sent_text", "reply_text", "reply_ts", "requested_ts",
                   "accepted_ts", "skip_reason")
+def no_pdf(v):
+    """A message version meant to be sent without the report PDF."""
+    return "no pdf" in str((v or {}).get("label") or "").lower()
+
+
+def keep_no_pdf(old, incoming):
+    """He wants a no-PDF version on every card, even once the PDF exists.
+    When a new set brings none, carry over the card's no-PDF versions (or its
+    ask-first versions, relabelled) instead of dropping them."""
+    if any(no_pdf(v) for v in incoming):
+        return incoming
+    keep = [dict(v) for v in (old.get("variants") or []) if no_pdf(v)]
+    if not keep:
+        keep = [dict(v, label=(str(v.get("label") or "Ask first") + ", no PDF")[:60])
+                for v in (old.get("ask_variants") or []) if str(v.get("text") or "").strip()]
+    return list(incoming) + keep[:2]
+
+
 ID_RE = re.compile(r"^[A-Za-z0-9_.:\-]{1,80}$")
 
 
@@ -274,11 +292,16 @@ def cmd_load(args):
             old = by_id.get(src["id"])
             if old:
                 if old.get("status") == "ready":
-                    if old.get("accepted_ts") or (old.get("kind") or "message") != (lead.get("kind") or "message"):
+                    other_kind = (old.get("kind") or "message") != (lead.get("kind") or "message")
+                    # --messages: he is replacing the message versions of people who
+                    # accepted and are waiting to be messaged (same kind only).
+                    if other_kind or (old.get("accepted_ts") and not getattr(args, "messages", False)):
                         # It moved on in the app (e.g. a connect that was accepted):
                         # refresh the facts, never its kind or message state.
                         for k in ("kind", "needs_message", "variants", "library"):
                             lead.pop(k, None)
+                    if isinstance(lead.get("variants"), list) and (old.get("attachments") or lead.get("attachments")):
+                        lead["variants"] = keep_no_pdf(old, lead["variants"])
                     old.update(lead)
                     old["updated_ts"] = stamp
                     report["refreshed"].append(src["id"])
@@ -458,6 +481,8 @@ def main():
     p = sub.add_parser("load")
     p.add_argument("file")
     p.add_argument("--allow-repeat", action="store_true")
+    p.add_argument("--messages", action="store_true",
+                   help="also replace message versions on accepted connections still waiting to be sent")
     p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("library")
     p.add_argument("file")

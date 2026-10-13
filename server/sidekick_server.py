@@ -1609,8 +1609,17 @@ def agent_write_dm(job, body):
                 lead.pop("previous_text", None)
                 written += 1
             elif variants and lead.get("status") == "ready":
-                lead["variants"] = variants[:4]
-                # The full set arrived (the report is made): nothing is pending any more.
+                new = variants[:4]
+                # The full set arrived (the report is made). He wants a no-PDF
+                # version on the card too, so keep one if the new set has none.
+                if lead.get("attachments") and not any("no pdf" in str(v.get("label") or "").lower() for v in new):
+                    keep = [dict(v) for v in lead.get("variants") or [] if "no pdf" in str(v.get("label") or "").lower()]
+                    if not keep:
+                        keep = [dict(v, label=(str(v.get("label") or "Ask first") + ", no PDF")[:60])
+                                for v in lead.get("ask_variants") or [] if str(v.get("text") or "").strip()]
+                    new = new + keep[:2]
+                lead["variants"] = new
+                # Nothing is pending any more.
                 if lead.get("attachments"):
                     for k in ("needs_report", "ask_variants", "ask_on"):
                         lead.pop(k, None)
