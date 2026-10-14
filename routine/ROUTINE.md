@@ -99,6 +99,49 @@ workspace path lives under `knowledge/`:
      `{"tweets": ["<tweet_id>"]}`, then return the full text as `tweet_text`.
    - Skipping weak targets is allowed. Say why in `agent_note` and leave `drafts` empty.
 
+### Plain first (highest reply rule, from his feedback on 2026-10-14)
+
+He said the drafts are "over the top". His own queue shows exactly how. Measured
+over the 54 replies he posted against the 251 drafts he did not use:
+
+| | he posted | drafts he passed on |
+|---|---|---|
+| "we / our / building" insider lines | **0%** | 4-7% |
+| hype or drama words (insane, wild, bold, scared, nervous, lol, !!) | 3% | 8-12% |
+| ends in a question | 42% | 32% |
+| jokes, by the draft's own label | 5 picked | 24 passed on |
+
+Length was not the problem (median 9 words in both). Performance was: drafts
+trying to be clever, impressive or emotional. He picks the plain one.
+
+What he actually posts (copy this shape): "Is the backlink dofollow?", "What are CVP
+customers?", "are people paying for one template or the whole set?", "people are
+really using this one 🔥", "one man marketing team 🫡", "Did the mom line close
+anything at least?". One small, honest thought about one concrete thing in the post.
+
+Rules, all accounts, all voices. They override the voice guides, the R-move
+playbook and the anchor bank wherever those push the other way:
+
+1. **One plain thought.** Ask "what would a normal person type here in ten
+   seconds?" and write that. No setup, no second clause bolted on with a comma,
+   "now i", "btw" or "makes me want to".
+2. **No insider or receipt lines** unless his take asks for one: no "we built",
+   "we've been testing", "our tool", "we took a client from X to Y". He has posted
+   none of these.
+3. **No hype or drama words**: insane, crazy, wild, cracked, cooks, bold, game
+   changer, "is the whole review", "never stood a chance", "i'd be scared",
+   "makes me nervous", "read this twice", "!!". No age hook.
+4. **Jokes only when the post is itself a joke or meme**, and then short and
+   obvious ("+ sleep more"). Never a clever meta line about the post.
+5. **Emoji in at most 1 draft in 4**, one emoji, at the end.
+6. **A plain question about a real gap in the post is the default move.** It is
+   what he picks most.
+7. **Fewer is better than performed.** If only one voice has a plain reply,
+   send one draft and say so in `agent_note`. The three voices change rhythm and
+   which detail they notice, never how hard they try.
+8. **Judge question, added to rule 6 below:** "Is this trying to be clever,
+   impressive or emotional?" Yes means rewrite it plainer or drop it.
+
 ### The three-voice set (account `abhiijayVinayak`)
 
 When `account` is `abhiijayVinayak`, write **exactly three drafts per item**, one
@@ -214,7 +257,8 @@ Pick 5 approved lines that are closest to each post and imitate their **shape**.
    Beamcite (or SupaSidebar), at most once per item, and never as the punchline.
    Most drafts mention no product at all. The profile sells, not the reply.
 2. **No invented stakes.** Every "we / i did X" line must trace to an entry in
-   `LRN-anchor-bank.md` or a `voice_examples` reply. Name the source in the angle.
+   `LRN-anchor-bank.md` or a `voice_examples` reply, and per "Plain first" is only
+   used when his take asks for it. Name the source in the angle.
    No anchor means no confession: use a specific question or an observation instead.
 3. **Variety.** Questions are at most 40% of the batch. At most 1 draft per batch may use
    the "how do you tell X from Y" template. No two items may open with the same
