@@ -358,6 +358,8 @@ POST {base_url}/agent/job/{job_id}/drafts
 
 The server already ran Stage 1 (watchlist OR-search via Armory, 24h window, max
 one post per author, never-reply list removed). Do not re-fetch the watchlist.
+The server also drops posts that are not in English. If one still gets through
+(a mixed or very short caption), drop it: he only replies in English.
 
 1. `GET {base_url}/agent/job/{job_id}` returns `candidates`:
    `{url, author, author_followers, text, age_hours, likes, replies, retweets, views,

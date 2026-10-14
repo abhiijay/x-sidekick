@@ -122,6 +122,8 @@ JOB_TOKEN_TTL = 3 * 3600
 SCOUT_WINDOW_HOURS = 24
 SCOUT_CHUNK = 10
 SCOUT_MAX_CANDIDATES = 60
+# Scout keeps posts in this language only ("en" by default, empty = any).
+SCOUT_LANG = (os.environ.get("SIDEKICK_SCOUT_LANG", "en") or "").strip().lower()
 VOICE_EXAMPLES = 80
 DRAFT_CHUNK = 20            # items per routine run; keeps each payload draftable
 
@@ -2990,6 +2992,40 @@ def is_handled(cand, ids, urls):
     return bool(cand.get("url")) and clean_tweet_url(cand["url"]) in urls
 
 
+_EN_WORDS = set("the and is to of you it in for this that my on with just your we are be not "
+                "have was so but what how can do if at all me they from it's i'm don't".split())
+_FOREIGN_WORDS = set("le la les des est et pas une un du pour que qui dans sur avec ce je vous nous "
+                     "très ça c'est à el los las es por para una con lo mi muy pero der das und ist "
+                     "nicht ich mit ein eine zu auf não uma com você che il di per non sono een het "
+                     "dat niet ik votre vos notre mais aussi sont tout comme puis cette être avez "
+                     "pero también como está más todo esta sind auch oder aber wie mais também isso "
+                     "voor maar ook".split())
+
+
+def looks_english(text, lang=None):
+    """Cheap check that a post is English, so the scout skips posts he cannot reply to.
+
+    Uses X's own language tag when the API sends one, else counts scripts and
+    common words. Short captions with too little to judge are kept.
+    """
+    if lang and lang not in ("en", "und", "zxx", "qme", "qam", "qht", "qst", "art"):
+        return False
+    t = re.sub(r"https?://\S+|[@#]\w+", " ", str(text or ""))
+    letters = [c for c in t if c.isalpha()]
+    if not letters:
+        return True
+    non_latin = sum(1 for c in letters if ord(c) > 0x24F)
+    if non_latin / len(letters) > 0.2:
+        return False
+    words = re.findall(r"[^\W\d_]+(?:'[^\W\d_]+)?", t.lower())
+    en = sum(1 for w in words if w in _EN_WORDS)
+    other = sum(1 for w in words if w in _FOREIGN_WORDS)
+    if other >= 2 and other > en:
+        return False
+    accented = sum(1 for c in letters if 0xC0 <= ord(c) <= 0x24F)
+    return not (accented / len(letters) > 0.03 and en < 2)
+
+
 def scout_rank(c):
     """Lower is better: fresh, uncrowded, with a bonus for a view/engagement gap."""
     bonus = 6 if c.get("high_view_low_eng") else 0
@@ -3012,7 +3048,7 @@ def run_scout_stage1(job_id, token):
         cutoff = datetime.now(timezone.utc) - timedelta(hours=SCOUT_WINDOW_HOURS)
         blocked = blocked_set()
         done_ids, done_urls = handled_tweets()
-        pool, errors = {}, []
+        pool, errors, skipped_lang = {}, [], 0
         for n in range(0, len(handles), SCOUT_CHUNK):
             chunk = handles[n:n + SCOUT_CHUNK]
             query = "(" + " OR ".join("from:" + h for h in chunk) + ") -filter:replies"
@@ -3040,6 +3076,9 @@ def run_scout_stage1(job_id, token):
                 if not created or created < cutoff or not t.get("url"):
                     continue
                 if author.lower() in never or author.lower() in blocked:
+                    continue
+                if SCOUT_LANG == "en" and not looks_english(t.get("text"), t.get("lang")):
+                    skipped_lang += 1
                     continue
                 if is_handled({"url": t["url"], "tweet_id": tweet_id_from_url(t["url"])},
                               done_ids, done_urls):
@@ -3076,7 +3115,7 @@ def run_scout_stage1(job_id, token):
             for r in runs:
                 if r["job_id"] == job_id:
                     r.update(candidates=cands, credits_remaining=credits, errors=errors,
-                             handles_checked=len(handles))
+                             handles_checked=len(handles), skipped_language=skipped_lang)
             save_scout_runs(runs)
         if not cands:
             update_job(job_id, status="done", report="No posts in the last 24h from the watchlist. "
