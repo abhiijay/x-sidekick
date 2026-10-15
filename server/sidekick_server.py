@@ -1816,6 +1816,12 @@ PRIVATE_SOURCES = {
     "knowledge/voice-corpus/arthur-paired.json": "tools/x-sidekick/knowledge/voice-corpus/arthur-paired.json",
     "knowledge/voice-corpus/abhiijay-real-sends.json": "tools/x-sidekick/knowledge/voice-corpus/abhiijay-real-sends.json",
     "knowledge/voice-corpus/abhiijay-draft-edits.json": "tools/x-sidekick/knowledge/voice-corpus/abhiijay-draft-edits.json",
+    "knowledge/guides/humanizer-caught-tells-ledger.md": "guides/humanizer-caught-tells-ledger.md",
+    "knowledge/guides/skill-humanizer-guide.md": "guides/skill-humanizer-guide.md",
+    "knowledge/projects/SupaCite/twitter-format-research/REJECTED-DRAFTS.md":
+        "projects/SupaCite/twitter-format-research/REJECTED-DRAFTS.md",
+    "knowledge/projects/SupaCite/twitter-format-research/GOOD-EXAMPLES.md":
+        "projects/SupaCite/twitter-format-research/GOOD-EXAMPLES.md",
 }
 
 
