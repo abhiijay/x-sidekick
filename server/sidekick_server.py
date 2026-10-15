@@ -113,6 +113,8 @@ PEER_EVERY_S = max(10, int(env("SIDEKICK_PEER_EVERY_S", "40") or 40))
 SHEET_URL = env("SIDEKICK_SHEET_URL")
 SHEET_TOKEN = env("SIDEKICK_SHEET_TOKEN")
 SHEET_EVERY_S = max(20, int(env("SIDEKICK_SHEET_EVERY_S", "60") or 60))
+# The sheet's Sender column: which LinkedIn account this phone works from.
+SHEET_SENDER = env("SIDEKICK_SHEET_SENDER", "a1") or "a1"
 if PEER_URL and PEER_URL == PUBLIC_URL:
     # The public URL belongs to the peer, so Claude's callbacks would land there
     # and not here. Find more and Write with Claude stay on the peer.
@@ -2261,6 +2263,7 @@ def sheet_row(l, labels):
     camp = l.get("campaign") or ""
     return {"lead_id": l.get("id"), "linkedin": l.get("profile_url") or "", "status": status,
             "company": str(l.get("product") or "")[:120], "founder": str(l.get("name") or "")[:120],
+            "sender": SHEET_SENDER,
             "request_sent": day("requested_ts"), "connected": day("accepted_ts"),
             "dm_sent": day("sent_ts"), "replied": day("reply_ts"),
             "website": str(l.get("site") or "")[:200], "notes": note,

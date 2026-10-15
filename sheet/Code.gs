@@ -14,7 +14,7 @@
 var DEFAULT_TAB = 'LinkedIn Outreach';
 // payload key -> header text in row 1 (matched without case or spaces)
 var COLS = {
-  status: 'Status', company: 'Company', founder: 'Founder', linkedin: 'LinkedIn',
+  status: 'Status', company: 'Company', founder: 'Founder', linkedin: 'LinkedIn', sender: 'Sender',
   request_sent: 'Request sent', connected: 'Connected', dm_sent: 'DM sent', replied: 'Replied',
   website: 'Website', notes: 'Notes', lead_id: 'Lead ID', group: 'Group'
 };
