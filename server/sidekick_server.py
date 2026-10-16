@@ -1599,14 +1599,18 @@ def agent_write_dm(job, body):
                 lead["updated_ts"] = now_str()
                 continue
             if it.get("needs_report") and lead.get("status") == "ready":
-                # A real buyer with no report yet: no message is put on the card.
-                # The ask-first versions wait behind a button; the four full
-                # versions come with the PDF, from Cowork.
+                # A real buyer with no report yet. Operator, 2026-10-16: the
+                # no-PDF versions (Charlie / Casual, from a real ChatGPT answer)
+                # go straight on the card; the report gets made if they say yes.
                 ask = [{"label": str(v.get("label") or "Ask first")[:40], "text": str(v.get("text"))[:DM_TEXT_MAX]}
                        for v in (it.get("ask_variants") or []) if isinstance(v, dict) and str(v.get("text") or "").strip()]
                 lead["needs_report"] = True
                 lead["ask_variants"] = ask[:3]
-                if not lead.get("ask_on"):
+                if ask:
+                    lead["variants"] = [dict(v) for v in ask[:3]]
+                    lead["ask_on"] = True
+                    lead["variant_index"] = 0
+                elif not lead.get("ask_on"):
                     lead["variants"] = []
                 lead.pop("needs_message", None)
                 lead.pop("fix_note", None)
@@ -1627,7 +1631,9 @@ def agent_write_dm(job, body):
                 if lead.get("attachments"):
                     for k in ("needs_report", "ask_variants", "ask_on"):
                         lead.pop(k, None)
-                lead["variant_index"] = 0
+                # Not our buyer gets one of the three notes at random (operator,
+                # 2026-10-16), so the set gets tested evenly.
+                lead["variant_index"] = secrets.randbelow(len(new)) if lead.get("icp") == "light" and new else 0
                 lead.pop("needs_message", None)
                 lead.pop("draft_text", None)
                 lead.pop("fix_note", None)
