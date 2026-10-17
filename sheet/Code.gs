@@ -10,6 +10,13 @@
  *                                         TAB   = LinkedIn Outreach   (optional)
  *   Deploy > New deployment > Web app > Execute as: Me, Who has access: Anyone
  * Put the web app URL and the same token in the sidekick's server/.env.
+ *
+ * Find more also reads people nobody has taken yet from here (?pool=1): rows
+ * of this tab with an empty Sender, and founders on the Leads tab who are not
+ * in this tab at all. When the sidekick adds one, its next post fills the
+ * empty Sender with that device's code (a1, a2, k1, k2). A Sender that is
+ * already filled is never changed.
+ * After pasting a new version: Deploy > Manage deployments > edit > New version.
  */
 var DEFAULT_TAB = 'LinkedIn Outreach';
 // payload key -> header text in row 1 (matched without case or spaces)
@@ -20,6 +27,7 @@ var COLS = {
 };
 // When a person is already in the sheet under another Lead ID, only these move.
 var STATE_KEYS = ['status', 'request_sent', 'connected', 'dm_sent', 'replied'];
+var LEADS_TAB = 'Leads';
 
 function norm_(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
@@ -60,10 +68,40 @@ function authed_(token) {
   return !!want && token === want;
 }
 
+/* People nobody has taken: this tab with an empty Sender, then the Leads tab. */
+function pool_(sh, h, rows) {
+  var out = [], seen = {};
+  for (var i = 0; i < rows.length; i++) {
+    var s = slug_(rows[i][h.at.linkedin]);
+    if (s) seen[s] = true;
+    if (!s || rows[i][h.at.sender] || /stopped/i.test(rows[i][h.at.status])) continue;
+    out.push({ slug: s, linkedin: rows[i][h.at.linkedin], company: rows[i][h.at.company], founder: rows[i][h.at.founder],
+      website: rows[i][h.at.website], notes: rows[i][h.at.notes], sheet_id: rows[i][h.at.lead_id], from: 'LinkedIn Outreach' });
+  }
+  var lt = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LEADS_TAB);
+  if (!lt || lt.getLastRow() < 2) return out;
+  var head = lt.getRange(1, 1, 1, lt.getLastColumn()).getDisplayValues()[0];
+  var col = function (name) { return head.indexOf(name); };
+  var c = { id: col('id'), company: col('company'), website: col('website'), desc: col('description'), name: col('contact_name'),
+    role: col('contact_role'), li: col('contact_linkedin'), rev: col('revenue_amount_usd'), metric: col('revenue_metric'), cat: col('category') };
+  if (c.li < 0) return out;
+  var data = lt.getRange(2, 1, lt.getLastRow() - 1, head.length).getDisplayValues();
+  for (var j = 0; j < data.length; j++) {
+    var r = data[j], s2 = slug_(r[c.li]);
+    if (!s2 || seen[s2]) continue;
+    seen[s2] = true;
+    out.push({ slug: s2, linkedin: r[c.li], company: r[c.company], founder: r[c.name], role: c.role >= 0 ? r[c.role] : '',
+      website: r[c.website], description: c.desc >= 0 ? r[c.desc] : '', revenue: c.rev >= 0 ? r[c.rev] : '',
+      revenue_metric: c.metric >= 0 ? r[c.metric] : '', category: c.cat >= 0 ? r[c.cat] : '', sheet_id: r[c.id], from: 'Leads' });
+  }
+  return out;
+}
+
 function doGet(e) {
   if (!authed_(e.parameter.token)) return out_({ error: 'wrong or missing token' });
   var sh = tab_(), h = header_(sh), last = sh.getLastRow();
   var rows = last > 1 ? sh.getRange(2, 1, last - 1, h.width).getDisplayValues() : [];
+  if (e.parameter.pool) return out_({ ok: true, pool: pool_(sh, h, rows) });
   var people = [];
   for (var i = 0; i < rows.length; i++) {
     var s = slug_(rows[i][h.at.linkedin]);
@@ -107,7 +145,10 @@ function doPost(e) {
         continue;
       }
       var mine = rows[idx][h.at.lead_id] === r.lead_id;
-      var keys = mine ? Object.keys(COLS) : STATE_KEYS;
+      var keys = mine ? Object.keys(COLS) : STATE_KEYS.slice();
+      // Taking a person from the sheet: an empty Sender gets this device's
+      // code. A filled Sender (k1, k2, a1, a2) is never overwritten.
+      if (!mine && !rows[idx][h.at.sender] && r.sender) keys.push('sender');
       var changed = false;
       for (var j = 0; j < keys.length; j++) {
         var key = keys[j], v = r[key];

@@ -349,6 +349,7 @@ async function refresh() {
     state.lastOk = Date.now(); state.offline = false; updatedText();
     $('dot').title = local.on ? 'connected directly (server on this phone)' : 'connected';
     state.acceptWatch = h.accept_watch || null;
+    state.ask = h.ask !== false;   // the server can put buyer questions to ChatGPT
     if (h.sends != null) $('sendsCount').textContent = 'Replies Claude learns from: ' + h.sends
       + (h.rejects != null ? ' · rejected drafts it learns from: ' + h.rejects : '');
     syncChip(h.peer);
@@ -2813,7 +2814,9 @@ function needsBanner(needs) {
   const box = el('div', { class: 'needs-banner' });
   box.append(el('div', { class: 'nb-text' },
     el('b', { text: needs.length + (needs.length === 1 ? ' person needs' : ' people need') + ' a message' }),
-    el('div', { class: 'muted small', text: writing ? 'Claude is writing ' + writing + '. They show up here in a few minutes.' : 'New connections and fits with nothing written yet.' })));
+    el('div', { class: 'muted small', text: writing ? 'Claude is writing ' + writing + '. They show up here in a few minutes.'
+      : needs.some((l) => lastTry(l)) ? 'The last run wrote nothing for ' + needs.filter((l) => lastTry(l)).length + '. Tap Show to see why.'
+        : 'New connections and fits with nothing written yet.' })));
   box.append(el('div', { class: 'nb-actions' },
     el('button', { class: 'btn sm primary', text: writing ? 'Writing…' : '✍ Write with Claude', disabled: !!writing, onclick: async (e) => {
       const done = busy2(e.target);
@@ -2823,10 +2826,12 @@ function needsBanner(needs) {
     } }),
     el('button', { class: 'link', text: li.showNeeds ? 'Hide' : 'Show', onclick: () => { li.showNeeds = !li.showNeeds; renderDm('linkedin'); } })));
   if (li.showNeeds) {
-    box.append(el('div', { class: 'nb-list' }, ...needs.map((l) => el('div', { class: 'needs-row' },
-      el('b', { text: dmWho(l) }),
-      el('span', { class: 'muted', text: ' ' + [l.product, l.accepted_ts ? 'accepted ' + agoText(l.accepted_ts) : ''].filter(Boolean).join(' · ') }),
-      el('button', { class: 'more-btn', text: '⋯', onclick: () => dmMenu(l) })))));
+    box.append(el('div', { class: 'nb-list' }, ...needs.map((l) => el('div', {},
+      el('div', { class: 'needs-row' },
+        el('b', { text: dmWho(l) }),
+        el('span', { class: 'muted', text: ' ' + [l.product, l.writing_job ? 'writing…' : l.accepted_ts ? 'accepted ' + agoText(l.accepted_ts) : ''].filter(Boolean).join(' · ') }),
+        el('button', { class: 'more-btn', text: '⋯', onclick: () => dmMenu(l) })),
+      lastTry(l)))));
   }
   return box;
 }
@@ -3011,6 +3016,14 @@ function stepTile({ icon, title, lines, onclick, busy, pending }) {
     el('span', { class: 'ns-body' }, el('b', { text: title }), ...lines.map((t) => el('span', { class: 'ns-line', text: t }))),
     onclick && !busy ? el('span', { class: 'ns-go', text: '›' }) : null);
 }
+/* What the last Claude run did for this person, when it wrote nothing. */
+function lastTry(l) {
+  const w = l.last_write;
+  if (!w || l.writing_job || w.result === 'written' || Date.now() - tsMs(w.ts) > 3 * 86400e3) return null;
+  return el('div', { class: 'ns-result' },
+    el('b', { text: (w.result === 'not_a_fit' ? 'Claude said not a fit' : 'Last try wrote nothing') + ' · ' + agoText(w.ts) }),
+    el('span', { text: w.why || 'No reason given.' }));
+}
 function nextSteps(l) {
   if (!isIcp(l) || !pdfPending(l)) return null;
   const p = l.product || 'their product';
@@ -3022,9 +3035,12 @@ function nextSteps(l) {
       lines: ['Claude is asking ChatGPT a question a buyer of ' + p + ' would type, then writing the messages from the answer.',
         (job ? 'Started ' + agoText(job.ts) + ' · ' : '') + 'usually 3 to 5 minutes. You get a notification when it is done.'] }));
   } else if (canResearch(l)) {
-    tiles.push(stepTile({ icon: '🔎', title: 'Research and write the message',
+    const lt = lastTry(l);
+    if (lt) tiles.push(lt);
+    tiles.push(stepTile({ icon: '🔎', title: l.last_write ? 'Try the research again' : 'Research and write the message',
       lines: ['Asks ChatGPT one question a buyer of ' + p + ' would type, then writes the no-PDF messages from what it says.',
-        'Takes a few minutes. Nothing is sent.'],
+        state.ask === false ? 'The ChatGPT check is off on the server (no DataForSEO login), so this run cannot research yet and will write nothing.'
+          : 'Takes a few minutes. Nothing is sent.'],
       onclick: (e) => { const t = e.currentTarget; t.disabled = true; t.querySelector('b').textContent = 'Starting…'; researchLeads([l]); } }));
   }
   tiles.push(l.report_requested

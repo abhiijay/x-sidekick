@@ -1466,8 +1466,17 @@ def run_find_stage1(job_id, token):
         find_cfg = camp.get("find") or {}
         keys, names = touched_keys()
         update_job(job_id, status="fetching", progress="starting")
-        cands, report = lead_finder.find(
-            need="linkedin" if p["channel"] == "linkedin" else "x", want=p["want"],
+        # LinkedIn: people in the lead sheet nobody has taken come first.
+        sheet_cands, sheet_note = [], ""
+        if p["channel"] == "linkedin":
+            update_job(job_id, progress="reading the lead sheet")
+            try:
+                sheet_cands, sheet_note = sheet_pool(keys, p["want"])
+            except Exception as e:
+                sheet_note = "Lead sheet: %s" % str(e)[:120]
+        rest = max(0, p["want"] - len(sheet_cands) // 2)
+        cands, report = ([], {"sources": {}, "errors": [], "stopped": None}) if rest == 0 else lead_finder.find(
+            need="linkedin" if p["channel"] == "linkedin" else "x", want=rest,
             days=max(p["days"], clamp_int(find_cfg.get("days"), 3, 60, p["days"])),   # a campaign may look further back
             touched=keys, touched_names=names,
             exclude_keywords=find_cfg.get("exclude_keywords") or (),
@@ -1475,6 +1484,9 @@ def run_find_stage1(job_id, token):
             require_pricing=bool(find_cfg.get("require_pricing", True)),
             time_budget=int(find_cfg.get("time_budget_s") or 420),
             progress=lambda msg: update_job(job_id, progress=msg[:120]))
+        cands = sheet_cands + cands
+        if sheet_note:
+            report["sheet"] = sheet_note
         update_find_run(job_id, candidates=cands, stage1=report)
         if not cands:
             update_job(job_id, status="done", report="Nothing new passed the checks. " + find_summary(report))
@@ -1493,7 +1505,7 @@ def run_find_stage1(job_id, token):
 
 
 def find_summary(report):
-    bits = []
+    bits = [report["sheet"]] if report.get("sheet") else []
     for name, st in (report.get("sources") or {}).items():
         if st.get("listed"):
             bits.append("%s: %d launches, %d with a link, %d passed" % (
@@ -1540,6 +1552,8 @@ def add_found_leads(job_id, keep, note=""):
                     "fields": {"n": c.get("first") or "", "p": c.get("product") or ""},
                     "status": "ready", "order": order, "added_ts": stamp, "updated_ts": stamp,
                     "found_by": job_id}
+            if c.get("sheet_id"):
+                lead["sheet_id"] = c["sheet_id"]
             if run["channel"] == "linkedin":
                 lead.update(kind="connect", profile_url=c.get("linkedin"))
             else:
@@ -1843,6 +1857,11 @@ def agent_write_dm(job, body):
                         for v in (it.get("variants") or []) if isinstance(v, dict) and str(v.get("text") or "").strip()]
             if it.get("flag"):
                 lead["flag"] = "; ".join(x for x in (lead.get("flag"), str(it["flag"])[:300]) if x)
+            # What this run did for this person, shown on their card.
+            why = str(it.get("not_a_fit") or it.get("no_followup") or it.get("flag") or "")[:300]
+            got = bool(variants or it.get("ask_variants") or it.get("followup_variants"))
+            lead["last_write"] = {"ts": now_str(), "job": job["id"], "result": "written" if got else
+                                  "not_a_fit" if it.get("not_a_fit") else "nothing", "why": why}
             if job["payload"].get("followup"):
                 fu = [{"label": str(v.get("label") or "Follow-up")[:40], "text": str(v.get("text"))[:DM_TEXT_MAX]}
                       for v in (it.get("followup_variants") or it.get("variants") or [])
@@ -2580,9 +2599,9 @@ def sheet_row(l, labels):
             "group": "Sidekick: " + str(labels.get(camp) or camp or "no campaign")}
 
 
-def sheet_call(body=None, timeout=60):
+def sheet_call(body=None, timeout=60, params=None):
     if body is None:
-        req = urllib.request.Request(SHEET_URL + "?" + urllib.parse.urlencode({"token": SHEET_TOKEN}))
+        req = urllib.request.Request(SHEET_URL + "?" + urllib.parse.urlencode(dict(params or {}, token=SHEET_TOKEN)))
     else:
         req = urllib.request.Request(SHEET_URL, data=json.dumps(dict(body, token=SHEET_TOKEN)).encode("utf-8"),
                                      headers={"Content-Type": "application/json"})
@@ -2621,6 +2640,35 @@ def sheet_sync_once():
         pushed += len(chunk)
         SHEET_STATUS["waiting"] = len(todo) - pushed
     return pushed
+
+
+def sheet_pool(touched, want):
+    """People in the lead sheet nobody has taken yet (empty Sender in LinkedIn
+    Outreach, or founders on the Leads tab not in it), as Find more
+    candidates. When one is added, the sheet sync fills their Sender with this
+    device's code, so the other accounts see them as taken."""
+    if not (SHEET_URL and SHEET_TOKEN):
+        return [], "Lead sheet: not connected on this device"
+    pool = sheet_call(params={"pool": "1"}, timeout=90).get("pool") or []
+    out = []
+    for p in pool:
+        key = "li:" + str(p.get("slug") or "").lower()
+        if key == "li:" or key in touched:
+            continue
+        rev = re.sub(r"[^0-9.]", "", str(p.get("revenue") or ""))
+        rev = float(rev) if rev else None
+        pts = 9 if rev and rev >= 500 else 7
+        maker = str(p.get("founder") or "").strip()
+        out.append({"source": "Lead sheet", "product": p.get("company") or "", "site": p.get("website") or "",
+                    "tagline": str(p.get("description") or "")[:200], "maker": maker, "first": maker.split(" ")[0] if maker else "",
+                    "headline": " · ".join(x for x in (str(p.get("role") or ""), ("revenue $%s %s" % (p.get("revenue"), p.get("revenue_metric") or "")).strip() if rev else "") if x),
+                    "linkedin": p.get("linkedin"), "category": p.get("category") or "", "launch": None, "age_days": None,
+                    "score": pts, "score_why": "from the lead sheet (%s)%s" % (p.get("from"), ", revenue on file" if rev else ""),
+                    "tier": "Contact this week" if pts >= 8 else "Next batch", "key": key,
+                    "sheet_id": p.get("sheet_id") or "", "notes": str(p.get("notes") or "")[:200], "prices": []})
+        if len(out) >= want * 2:
+            break
+    return out, "Lead sheet: %d free, %d taken for this run" % (len(pool), min(len(out), want * 2))
 
 
 def sheet_pull_touched():
@@ -4409,11 +4457,23 @@ class AppHandler(BaseHandler):
                                 i.pop("drafting_job", None)
                         save_queue(items)
                 if job["kind"] == "dmwrite":
+                    note = str(body.get("report", ""))[:300] or "Claude wrote nothing for this person."
+                    if not ask_configured():
+                        note += " The ChatGPT check is off on this server (no DataForSEO login), so buyer research cannot run."
                     with LOCK:
                         leads = load_dm_leads()
+                        ids = set(job["payload"].get("lead_ids") or [])
                         for l in leads:
                             if l.get("writing_job") == job["id"]:
                                 l.pop("writing_job", None)
+                            # A buyer still waiting on the report goes back to their card.
+                            if l.get("id") in ids and l.get("needs_report") and not l.get("variants"):
+                                l.pop("needs_message", None)
+                            if l.get("id") in ids and (l.get("last_write") or {}).get("job") != job["id"]:
+                                l["last_write"] = {"ts": now_str(), "job": job["id"], "result": "nothing", "why": note}
+                                l["updated_ts"] = now_str()
+                            elif l.get("id") in ids and not ask_configured() and l["last_write"].get("result") != "written":
+                                l["last_write"]["why"] = (l["last_write"].get("why") or "") + " (The ChatGPT check is off on this server.)"
                         save_dm_leads(leads)
                 if job["kind"] == "leadfind" and body.get("failed"):
                     # Claude could not judge them: keep the best by score, flagged.

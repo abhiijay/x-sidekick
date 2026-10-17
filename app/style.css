@@ -593,3 +593,7 @@ button.ns-tile:disabled { opacity: .6; }
 .ns-body b { font-size: 15px; font-weight: 700; }
 .ns-line { font-size: 13px; line-height: 1.4; color: var(--muted); }
 .ns-go { flex: none; align-self: center; font-size: 22px; color: var(--muted); }
+.ns-result { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: 12px;
+  background: var(--warn-soft); color: var(--text); font-size: 13px; line-height: 1.4; }
+.ns-result b { color: var(--warn); font-size: 13px; }
+.nb-list .ns-result { margin: 0 0 8px; }
