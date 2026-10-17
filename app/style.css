@@ -523,3 +523,33 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .toast { box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
 .link { color: var(--accent-text); }
 .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+
+/* ---- UX pass: last updated, pull to refresh, counters, Done, caught up ---- */
+.title-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.title-wrap h1 { flex: none; }
+.updated { font-size: 11.5px; font-weight: 600; color: var(--muted); line-height: 1.2; }
+.updated:empty { display: none; }
+.updated.off { color: var(--warn); }
+html, body { overscroll-behavior-y: contain; }
+.ptr { position: fixed; left: 50%; top: calc(58px + env(safe-area-inset-top)); z-index: 30; width: 36px; height: 36px;
+  margin-left: 0; transform: translate(-50%, 0); opacity: 0; border-radius: 50%; display: grid; place-items: center;
+  background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); color: var(--muted); pointer-events: none; }
+.ptr.ready { color: var(--accent-text); }
+.ptr.spinning { opacity: 1 !important; transform: translate(-50%, 50px) !important; }
+.ptr.spinning .ptr-ico { animation: spin .8s linear infinite; }
+.ptr-ico { font-size: 18px; line-height: 1; }
+.xcount { display: block; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 4px; }
+.take-row .xcount { display: inline; margin: 0; }
+.xcount.over { color: var(--err); font-weight: 700; }
+.done-row { padding: 0 6px 0 12px; }
+.done-row .row-main { padding: 12px 0; }
+.status-pill { font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 2px 8px; vertical-align: 1px; }
+.status-pill.posted { color: var(--ok); background: var(--ok-soft); }
+.status-pill.skipped { color: var(--muted); background: var(--surface-2); }
+.done-detail { margin: -6px 0 10px; padding: 12px 14px; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 14px 14px; background: var(--surface); }
+.done-row.open { border-radius: 14px 14px 0 0; margin-bottom: 0; }
+.post.mine { color: var(--text); background: var(--accent-soft); border-radius: 10px; padding: 8px 10px; }
+.done-sum { margin: -2px 2px 4px; }
+.caught-up { text-align: center; padding: 40px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.cu-title { font-size: 19px; font-weight: 750; letter-spacing: -.015em; margin-bottom: 6px; }
+.cu-actions { display: flex; gap: 8px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }

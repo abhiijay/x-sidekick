@@ -210,9 +210,59 @@ function sheet(title, actions) {
     body.append(el('button', { class: a.danger ? 'danger' : '', text: a.label, onclick: () => { closeSheet(); a.run(); } }));
   }
   body.append(el('button', { text: 'Cancel', onclick: closeSheet }));
-  $('sheet').hidden = false;
+  openSheetEl();
 }
-function closeSheet() { $('sheet').hidden = true; }
+function closeSheet() { $('sheet').hidden = true; releaseBack(); }
+function openSheetEl() { $('sheet').hidden = false; holdBack(); buzz(6); }
+
+/* Android's back button closes what is open (a sheet, select mode) before it
+ * leaves the app. One guard entry sits in history while anything is open; it
+ * is dropped a moment after the last thing closes, so a sheet that opens
+ * another sheet keeps it. */
+const backGuard = { on: false, ignore: 0, timer: null };
+function somethingOpen() {
+  return !$('sheet').hidden || (typeof li !== 'undefined' && li.sel.on) || (typeof wsel !== 'undefined' && wsel.on);
+}
+function holdBack() {
+  clearTimeout(backGuard.timer);
+  if (backGuard.on) return;
+  try { history.pushState({ sk: 1 }, ''); backGuard.on = true; } catch { /* ignore */ }
+}
+function releaseBack() {
+  clearTimeout(backGuard.timer);
+  backGuard.timer = setTimeout(() => {
+    if (!backGuard.on || somethingOpen()) return;
+    backGuard.on = false; backGuard.ignore++;
+    history.back();
+  }, 350);
+}
+window.addEventListener('popstate', () => {
+  if (backGuard.ignore) { backGuard.ignore--; return; }
+  backGuard.on = false;
+  if (!$('sheet').hidden) { $('sheet').hidden = true; }
+  else if (li.sel.on) { li.sel.on = false; li.sel.ids.clear(); renderDm('linkedin'); }
+  else if (wsel.on) { wsel.on = false; wsel.ids.clear(); renderReplies(); }
+  else return;
+  if (somethingOpen()) holdBack();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('sheet').hidden) closeSheet(); });
+
+/* A short tap of vibration on the actions that change something. */
+function buzz(ms = 12) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch { /* not supported */ } }
+
+/* X counts most characters as 1 and CJK and emoji as 2, links as 23. */
+function xLength(t) {
+  let n = 0;
+  const text = String(t || '').replace(/https?:\/\/\S+/g, (u) => { n += 23; return ''; });
+  for (const ch of text) n += ch.codePointAt(0) > 0x10FF ? 2 : 1;
+  return n;
+}
+function xCounter(ta) {
+  const c = el('span', { class: 'xcount' });
+  const draw = () => { const n = xLength(ta.value); c.textContent = n + '/280'; c.classList.toggle('over', n > 280); };
+  ta.addEventListener('input', draw); draw();
+  return c;
+}
 $('sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') closeSheet(); });
 
 /* ---------------- navigation ---------------- */
@@ -237,7 +287,11 @@ function showTab(name) {
   if (name === 'replies' && typeof renderReady === 'function') renderReplies();
   window.scrollTo(0, 0);
 }
-document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('click', () => {
+  // Tapping the tab you are already on takes you back to the top.
+  if (currentTab() === b.dataset.tab) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+  showTab(b.dataset.tab);
+}));
 function currentTab() { return document.querySelector('.tabbar button.on').dataset.tab; }
 
 function showSeg(name) {
@@ -273,6 +327,7 @@ async function refresh() {
       .forEach(([p, r]) => { if (ch(r)) applyData(p, r); });
     [['/api/queue', q], ['/api/outreach', o], ['/api/jobs', j], ['/api/blocklist', b], ['/api/dm', d]].forEach(([p, r]) => keepTag(p, r));
     $('dot').className = 'dot ok';
+    state.lastOk = Date.now(); state.offline = false; updatedText();
     $('dot').title = local.on ? 'connected directly (server on this phone)' : 'connected';
     state.acceptWatch = h.accept_watch || null;
     if (h.sends != null) $('sendsCount').textContent = 'Replies Claude learns from: ' + h.sends
@@ -293,6 +348,7 @@ async function refresh() {
     schedulePoll();
   } catch (e) {
     $('dot').className = 'dot err';
+    state.offline = true; updatedText();
     banner(e.status === 401 ? 'Wrong password. Fix it in Settings.' : 'Server unreachable: ' + e.message, true);
   }
 }
@@ -523,7 +579,7 @@ function draftCard(it, opts = {}) {
   // silently stored the draft as if it were what he sent - teaching the writer
   // its own output back.
   const sentWrap = el('div', { class: 'sent-edit' },
-    el('label', { class: 'sent-label', text: 'What you actually sent' }), sent);
+    el('div', { class: 'take-row' }, el('label', { class: 'sent-label', text: 'What you actually sent' }), el('span', { class: 'spacer' }), xCounter(sent)), sent);
 
   const drafts = el('div', { class: 'drafts' });
   (it.drafts || []).forEach((d, idx) => {
@@ -547,15 +603,18 @@ function draftCard(it, opts = {}) {
     const edit = () => {
       const ta = el('textarea', { class: 'draft-edit', rows: 3 });
       ta.value = textOf(idx);
+      const count = xCounter(ta);
       const done = () => {
         const v = ta.value.trim();
         if (v && v !== d.text) { edits[idx] = v; setEdit(it.id, idx, v); box.classList.add('edited'); }
         txt.textContent = textOf(idx);
+        count.remove();
         ta.replaceWith(txt);
         pick();
       };
       ta.addEventListener('blur', done);
       txt.replaceWith(ta);
+      ta.after(count);
       ta.focus();
     };
     box.append(el('div', { class: 'draft-foot' },
@@ -634,11 +693,14 @@ function attachSwipe(card, onRight, onLeft) {
     dx = mx;
     card.style.transition = 'none';
     card.style.transform = 'translateX(' + dx + 'px) rotate(' + (dx / 40) + 'deg)';
-    card.dataset.swipe = dx > 90 ? 'right' : dx < -90 ? 'left' : '';
+    const zone = dx > 90 ? 'right' : dx < -90 ? 'left' : '';
+    if (zone && card.dataset.swipe !== zone) buzz(8);   // a tick when it would trigger
+    card.dataset.swipe = zone;
   }, { passive: false });
   card.addEventListener('touchend', () => {
     if (mode !== 'h') return;
     const go = dx > 90 ? onRight : dx < -90 ? onLeft : null;
+    if (go) buzz(15);
     card.style.transition = 'transform .2s ease';
     card.style.transform = go ? 'translateX(' + (dx > 0 ? 120 : -120) + '%)' : '';
     card.dataset.swipe = '';
@@ -689,7 +751,20 @@ const rp = { view: LS.get('rp_view', 'focus'), focus: LS.get('rp_focus', '') || 
 function typeName(t) { return t === 'other' ? 'No type' : t.replace(/-/g, ' '); }
 function renderReady(allReady, emptyText) {
   const box = $('readyList');
-  if (!allReady.length) { box.replaceChildren(el('div', { class: 'empty', text: emptyText })); setDmActions(null); return; }
+  if (!allReady.length) {
+    const today = localStamp().slice(0, 10);
+    const postedToday = state.items.filter((i) => i.status === 'posted' && String(i.posted_ts || '').startsWith(today)).length;
+    const waiting = state.items.filter((i) => i.status === 'queued').length;
+    const drafting = /few minutes/.test(emptyText);
+    box.replaceChildren(el('div', { class: 'caught-up' },
+      el('div', { class: 'cu-title', text: drafting ? 'Claude is drafting' : postedToday ? 'All caught up' : 'Nothing to post yet' }),
+      el('div', { class: 'muted', text: drafting ? emptyText : (postedToday ? postedToday + ' posted today. ' : '') + (waiting ? waiting + ' posts are waiting for a take.' : 'Find new posts to reply to.') }),
+      el('div', { class: 'cu-actions' },
+        waiting ? el('button', { class: 'btn primary', text: 'Open Waiting (' + waiting + ')', onclick: () => showSeg('waiting') }) : null,
+        el('button', { class: 'btn', text: 'Find posts', onclick: () => showTab('scout') }))));
+    setDmActions(null);
+    return;
+  }
   // Post-type filter, for when Ready is long.
   const types = {};
   allReady.forEach((i) => { const t = i.post_type || 'other'; types[t] = (types[t] || 0) + 1; });
@@ -736,7 +811,7 @@ function waitingBar(waiting) {
   if (!waiting.length) return [];
   if (!wsel.on) {
     return [el('div', { class: 'view-row' }, el('span', { class: 'spacer' }),
-      el('button', { class: 'pill-chip', text: 'Select', onclick: () => { wsel.on = true; wsel.ids.clear(); renderReplies(); } }))];
+      el('button', { class: 'pill-chip', text: 'Select', onclick: () => { wsel.on = true; wsel.ids.clear(); holdBack(); renderReplies(); } }))];
   }
   const live = new Set(waiting.map((i) => i.id));
   [...wsel.ids].forEach((id) => { if (!live.has(id)) wsel.ids.delete(id); });
@@ -748,7 +823,7 @@ function waitingBar(waiting) {
     el('button', { class: 'pill-chip', text: all ? 'Select none' : 'Select all', onclick: () => pick(all ? [] : waiting) }),
     flagged.length ? el('button', { class: 'pill-chip', text: 'Ones Claude skipped (' + flagged.length + ')', onclick: () => pick(flagged) }) : null,
     el('span', { class: 'spacer' }),
-    el('button', { class: 'pill-chip', text: 'Cancel', onclick: () => { wsel.on = false; wsel.ids.clear(); renderReplies(); } }),
+    el('button', { class: 'pill-chip', text: 'Cancel', onclick: () => { wsel.on = false; wsel.ids.clear(); releaseBack(); renderReplies(); } }),
     el('button', { class: 'pill-chip warn', text: n ? 'Remove ' + n : 'Remove', disabled: !n, onclick: (e) => removeSelected(e.target) }))];
 }
 async function removeSelected(btn) {
@@ -790,16 +865,59 @@ function waitingCard(it) {
   return card;
 }
 
+const doneOpen = new Set();
 function doneRow(it) {
-  return el('div', { class: 'row-card' }, avatar(it.author),
-    el('div', { class: 'grow' },
-      el('b', { text: '@' + handleOf(it.author) + ' · ' + it.status }),
-      el('div', { class: 'line', text: it.posted_text || postText(it) })),
+  const open = doneOpen.has(it.id);
+  const row = el('div', { class: 'row-card done-row' + (open ? ' open' : '') }, avatar(it.author),
+    el('button', { class: 'row-main', onclick: () => { if (doneOpen.has(it.id)) doneOpen.delete(it.id); else doneOpen.add(it.id); renderDone(); } },
+      el('span', { class: 'row-text' },
+        el('b', {}, '@' + handleOf(it.author) + ' ', el('span', { class: 'status-pill ' + it.status, text: it.status === 'posted' ? 'Posted' : 'Skipped' })),
+        el('span', { class: 'line', text: it.posted_text || postText(it) }))),
     el('button', { class: 'more-btn', text: '⋯', onclick: () => itemMenu(it) }));
+  if (!open) return row;
+  const box = el('div', { class: 'done-detail' },
+    el('div', { class: 'sent-label', text: 'Their post' }), el('div', { class: 'post open', text: postText(it) || '(no text)' }));
+  if (it.posted_text) box.append(el('div', { class: 'sent-label', text: 'You posted' }), el('div', { class: 'post open mine', text: it.posted_text }));
+  if (postUrl(it)) box.append(el('a', { class: 'link open-x', href: postUrl(it), target: '_blank', rel: 'noopener', text: 'Open on X' }));
+  return el('div', {}, row, box);
+}
+const doneQ = { q: '' };
+function dayLabel(ts) {
+  const d = String(ts || '').slice(0, 10);
+  if (!d) return 'Earlier';
+  if (d === localStamp().slice(0, 10)) return 'Today';
+  if (d === localStamp(new Date(Date.now() - 86400000)).slice(0, 10)) return 'Yesterday';
+  return new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+}
+function renderDone() {
+  const box = $('doneList');
+  const all = state.items.filter((i) => i.status === 'posted' || i.status === 'skipped')
+    .sort((a, b) => String(b.posted_ts || b.mod || b.ts).localeCompare(String(a.posted_ts || a.mod || a.ts))).slice(0, 80);
+  const q = doneQ.q.trim().toLowerCase();
+  const list = q ? all.filter((i) => [i.author, i.posted_text, postText(i)].some((x) => String(x || '').toLowerCase().includes(q))) : all;
+  const posted = all.filter((i) => i.status === 'posted').length;
+  let inp = box.querySelector('input.search');
+  const keep = inp && document.activeElement === inp;
+  if (!inp) {
+    inp = el('input', { class: 'search', type: 'search', placeholder: 'Search a name or what you posted' });
+    inp.addEventListener('input', () => { doneQ.q = inp.value; clearTimeout(doneQ.t); doneQ.t = setTimeout(renderDone, 150); });
+  }
+  inp.value = doneQ.q;
+  const nodes = [inp, el('div', { class: 'small muted done-sum', text: posted + ' posted · ' + (all.length - posted) + ' skipped' })];
+  let last = '';
+  for (const it of list) {
+    const day = dayLabel(it.posted_ts || it.mod || it.ts);
+    if (day !== last) { nodes.push(el('div', { class: 'tier-head', text: day })); last = day; }
+    nodes.push(doneRow(it));
+  }
+  if (!list.length) nodes.push(el('div', { class: 'empty', text: q ? 'No match.' : 'Nothing here yet.' }));
+  box.replaceChildren(...nodes);
+  if (keep) inp.focus();
 }
 
 function renderReplies() {
   state.repliesStale = false;
+  if (backGuard.on && !somethingOpen()) releaseBack();
   // Freshest post first: a reply is worth most in the first hours.
   const ready = state.items.filter((i) => i.status === 'drafted').sort((a, b) => postTime(b) - postTime(a));
   prunePicks(new Set(ready.map((i) => i.id)));
@@ -831,7 +949,8 @@ function renderReplies() {
   if (!waiting.length) { wsel.on = false; wsel.ids.clear(); }
   fill('waitingList', waiting, waitingCard, 'Nothing waiting.');
   $('waitingList').prepend(...waitingBar(waiting).filter(Boolean));
-  fill('doneList', done, doneRow, 'Nothing here yet.');
+  void done;
+  renderDone();
 }
 
 async function finish(it, status, postedText, chosen, btn, verbatim) {
@@ -843,13 +962,14 @@ async function finish(it, status, postedText, chosen, btn, verbatim) {
     if (typeof chosen === 'number') body.chosen_index = chosen;
     if (typeof verbatim === 'boolean') body.sent_verbatim = verbatim;
     await api('/api/queue/update', body);
+    buzz(status === 'posted' ? 25 : 12);
     toast(status === 'posted' ? 'Nice. Marked posted.' : 'Skipped');
     await refresh();
   } catch (e) { toast(e.message, true); done(); }
 }
 
 async function setStatus(it, status) {
-  try { await api('/api/queue/update', { id: it.id, status }); await refresh(); } catch (e) { toast(e.message, true); }
+  try { await api('/api/queue/update', { id: it.id, status }); buzz(); await refresh(); } catch (e) { toast(e.message, true); }
 }
 
 async function blockUser(handle) {
@@ -1481,6 +1601,7 @@ async function dmStatus(l, status, extra, msg, undo) {
   const undoBody = undo && typeof undo === 'object' ? undo : { status: undo || prev };
   try {
     await dmSave(l, Object.assign({ status }, extra || {}));
+    buzz(status === 'sent' || status === 'requested' ? 25 : 12);
     dm.opened.delete(l.id);
     if (status === 'sent') clearCopied(l.id);
     buildDmDefaults();
@@ -1997,7 +2118,7 @@ function sheetCustom(title, nodes) {
   const body = $('sheetBody');
   body.replaceChildren(el('div', { class: 'sheet-title', text: title }), ...nodes,
     el('button', { text: 'Cancel', onclick: closeSheet }));
-  $('sheet').hidden = false;
+  openSheetEl();
 }
 
 function numberPicker(values, current, onPick, noun) {
@@ -2924,7 +3045,7 @@ function listTools(mode, list, nodes) {
     return k !== 'all' && !n ? null : el('button', { class: 'pill-chip small' + (li.filt[mode] === k ? ' accent' : ''), text: label + ' ' + n,
       onclick: () => { li.filt[mode] = k; LS.set('li_filt_' + mode, k); renderDm('linkedin'); } });
   }), el('button', { class: 'pill-chip small' + (li.sel.on ? ' accent' : ''), text: li.sel.on ? 'Done selecting' : '☑ Select',
-    onclick: () => { li.sel.on = !li.sel.on; li.sel.ids.clear(); renderDm('linkedin'); } }));
+    onclick: () => { li.sel.on = !li.sel.on; li.sel.ids.clear(); if (li.sel.on) holdBack(); else releaseBack(); renderDm('linkedin'); } }));
   nodes.push(row);
   if (!li.sel.on) return false;
   const shown = list.filter(matches).filter(passes(mode));
@@ -2975,6 +3096,7 @@ async function bulkSkip(list) {
 function renderDm(ch, keepLinesOpenFor) {
   const root = $('dm-' + ch);
   if (!root) return;
+  if (backGuard.on && !somethingOpen()) releaseBack();
   dm.pending[ch] = false;
   if (ch === 'linkedin' && !dm.missing && !dm.error) { renderLinkedIn(root); return; }
   if (ch === 'linkedin') setDmActions(null);
@@ -3153,7 +3275,50 @@ $('saveSettings').addEventListener('click', async (e) => {
   done();
 });
 
-$('refreshBtn').addEventListener('click', () => { refresh(); if (currentTab() === 'scout') loadScout(); });
+$('refreshBtn').addEventListener('click', () => { buzz(8); refresh(); if (currentTab() === 'scout') loadScout(); });
+
+/* When the lists were last brought up to date, under the title. Offline it
+ * says the app is showing the copy saved on this phone. */
+function updatedText() {
+  const n = $('updated');
+  if (!n) return;
+  const age = state.lastOk ? Math.round((Date.now() - state.lastOk) / 60000) : null;
+  n.classList.toggle('off', !!state.offline);
+  n.textContent = state.offline ? 'Offline · saved copy' + (age != null ? ' from ' + (age < 1 ? 'just now' : age + 'm ago') : '')
+    : age == null || age < 1 ? '' : 'Updated ' + (age < 60 ? age + 'm' : Math.round(age / 60) + 'h') + ' ago';
+}
+setInterval(updatedText, 30000);
+
+/* Pull down at the top of a list to refresh. */
+(() => {
+  const ptr = el('div', { class: 'ptr', 'aria-hidden': 'true' }, el('span', { class: 'ptr-ico', text: '↻' }));
+  document.body.append(ptr);
+  let y0 = null, pulled = 0;
+  document.addEventListener('touchstart', (e) => {
+    y0 = window.scrollY <= 0 && $('sheet').hidden && !/^(TEXTAREA|INPUT|SELECT)$/.test(e.target.tagName) ? e.touches[0].clientY : null;
+    pulled = 0;
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (y0 == null) return;
+    pulled = Math.max(0, e.touches[0].clientY - y0);
+    if (window.scrollY > 0) { pulled = 0; }
+    const d = Math.min(pulled, 110);
+    ptr.style.transform = 'translate(-50%, ' + (d * 0.7) + 'px) rotate(' + (d * 3) + 'deg)';
+    ptr.style.opacity = String(Math.min(1, d / 70));
+    ptr.classList.toggle('ready', pulled > 80);
+  }, { passive: true });
+  document.addEventListener('touchend', async () => {
+    if (y0 == null) return;
+    const go = pulled > 80;
+    y0 = null;
+    if (!go) { ptr.style.transform = ''; ptr.style.opacity = '0'; return; }
+    buzz(10);
+    ptr.classList.add('spinning');
+    await refresh();
+    if (currentTab() === 'scout') loadScout();
+    ptr.classList.remove('spinning', 'ready'); ptr.style.transform = ''; ptr.style.opacity = '0';
+  });
+})();
 // Coming back from LinkedIn or X. Unchanged data costs a few 304s and no redraw.
 document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - state.lastRefresh > 3000) refresh(); });
 
