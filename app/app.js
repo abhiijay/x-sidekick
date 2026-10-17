@@ -1360,6 +1360,14 @@ function takeDm(d) {
   dm.campaigns = d.campaigns || {};
   dm.versions = d.versions || {};
   dm.templates = d.templates || {};
+  // A buyer never shows the Non-ICP notes (Try it, Your take, Can I): those
+  // wait aside, and the card asks for the research the buyer messages need.
+  for (const l of dm.leads) {
+    if (['light', 'watch'].includes(l.icp) || l.status !== 'ready' || !(l.variants && l.variants.length)) continue;
+    const rows = ((dm.templates || {})[l.campaign] || {}).light || [];
+    const light = new Set(rows.length ? rows.map((r) => r.label) : ['Try it', 'Your take', 'Can I']);
+    if (l.variants.every((v) => light.has(v.label))) { l.light_variants = l.variants; l.variants = []; l.needs_report = true; delete l.draft_text; }
+  }
   buildDmDefaults();
 }
 
@@ -2758,8 +2766,6 @@ function messageFocus(list, nodes) {
   if (opened) card.append(el('div', { class: 'focus-hint', text: 'Sent it? Tap Sent. Changed it in LinkedIn? Paste what you sent over the text first.' }));
   const badge = pdfBadge(l);
   if (badge) card.append(badge);
-  const ns = nextSteps(l);
-  if (ns) card.append(ns);
   card.append(dmFlags(l, ''));
   const chips = variantChips(l);
   if (chips) card.append(chips);
@@ -2770,6 +2776,9 @@ function messageFocus(list, nodes) {
     canShuffle ? el('button', { class: 'link', text: '🎲 Another version', onclick: () => dmShuffle(l) }) : el('span', { class: 'muted small', text: 'Tap the text to edit' }),
     el('span', { class: 'spacer' }), count));
   if (files) card.append(files);
+  // The report PDF option sits under the drafted message.
+  const ns = nextSteps(l);
+  if (ns) card.append(ns);
   card.append(el('div', { class: 'focus-meta' },
     el('button', { class: 'link', text: '✎ Tell Claude what to change', onclick: () => tellClaude(l, ta) }),
     el('span', { class: 'spacer' }),

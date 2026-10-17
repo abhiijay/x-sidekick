@@ -1104,6 +1104,12 @@ def fill_template(text, slots):
     return re.sub(r"\{(\w+)\}", lambda m: slots.get(m.group(1), m.group(0)) if m.group(1) in TEMPLATE_SLOTS else m.group(0), text), []
 
 
+def light_labels(lead):
+    """Labels of the Non-ICP notes for this lead's campaign (Try it, Your take, Can I)."""
+    rows = (load_dm_templates().get(lead.get("campaign") or "") or {}).get("light") or []
+    return {r.get("label") for r in rows} or {"Try it", "Your take", "Can I"}
+
+
 def dm_templates_save(body):
     """He edited a template in the app. Saved for every message written from
     now on; with apply "all" the waiting messages written from the old
@@ -1877,6 +1883,16 @@ def agent_write_dm(job, body):
                 lead.pop("fix_note", None)
                 lead.pop("previous_text", None)
                 written += 1
+            elif (variants and lead.get("status") == "ready" and lead.get("icp") not in ("light", "watch")
+                    and all(v["label"] in light_labels(lead) for v in variants)):
+                # The Non-ICP notes (Try it, Your take, Can I) written for a
+                # buyer. A buyer gets the Charlie or Casual message from real
+                # research, or nothing yet (operator, 2026-10-17). Kept aside.
+                lead["light_variants"] = variants[:4]
+                lead["needs_report"] = True
+                lead["flag"] = "; ".join(x for x in (lead.get("flag"), "Claude wrote the Non-ICP notes for a buyer. "
+                                                     "Needs real research for the Charlie or Casual message.") if x)
+                lead.pop("needs_message", None)
             elif variants and lead.get("status") == "ready":
                 new = variants[:4]
                 # The full set arrived (the report is made). He wants a no-PDF
