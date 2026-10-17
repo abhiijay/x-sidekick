@@ -744,6 +744,8 @@ function renderReplies() {
   prunePicks(new Set(ready.map((i) => i.id)));
   const waiting = state.items.filter((i) => i.status === 'queued');
   const done = state.items.filter((i) => i.status === 'posted' || i.status === 'skipped').slice(0, 40);
+  // Drawn on boot from the phone's cache too, before the goal settings below exist.
+  try { $('replyStrip').replaceChildren(...replyStrip()); } catch { /* next render draws it */ }
   $('readyCount').textContent = ready.length || '';
   $('waitingCount').textContent = waiting.length || '';
   $('navBadge').textContent = ready.length || '';
@@ -1233,9 +1235,9 @@ function dmTicker() {
   if (!ch) return;
   dm.timer = setInterval(() => {
     if (document.hidden) return;
-    const nx = ch === 'linkedin' && document.querySelector('#dm-linkedin .li-next');
+    const nx = document.querySelector('#dm-' + ch + ' .li-next');
     if (nx) {
-      const w = paceState('linkedin', 'message').wait;
+      const w = paceState(ch, 'message').wait;
       nx.textContent = w ? 'Next in ' + mmss(w) : 'Ready for the next';
     }
     const box = document.querySelector('#dm-' + ch + ' .pace');
@@ -1948,8 +1950,8 @@ function openSessionSheet(ch, mode) {
   sheetCustom('How many ' + noun + ' this session?', nodes);
 }
 
-function openFindSheet() {
-  const ch = 'linkedin';
+function openFindSheet(which) {
+  const ch = typeof which === 'string' ? which : 'linkedin';
   const camps = Object.entries(dm.campaigns).filter(([, v]) => (v.channels || DM_CH).includes(ch));
   if (!camps.length) { toast('Set up the campaign rules in Cowork first', true); return; }
   let camp = camps.some(([k]) => k === LS.get('find_camp_' + ch)) ? LS.get('find_camp_' + ch) : camps[0][0];
@@ -1974,7 +1976,7 @@ function openFindSheet() {
   const draw = () => {
     grid.replaceChildren(...[10, 20, 30, 50].map((n) => el('button', { class: n === want ? 'on' : '', text: String(n),
       onclick: () => { want = n; other.value = ''; draw(); } })));
-    go.textContent = 'Find ' + want + ' people';
+    go.textContent = 'Find ' + want + (ch === 'x' ? ' leads' : ' people');
   };
   other.addEventListener('input', () => {
     const v = parseInt(other.value, 10);
@@ -1982,13 +1984,25 @@ function openFindSheet() {
   });
   draw();
   const status = findStatusText(ch);
-  sheetCustom('Find more people to connect with', [
+  // A finished run that found people but added none (Claude's check failed or
+  // was too strict): they can still be added as they are.
+  const fr = dm.find && dm.find.run;
+  const fj = dm.find && dm.find.job;
+  const unchecked = fr && fr.channel === ch && fj && !ACTIVE.includes(fj.status) && !fr.added_count && fr.candidate_count
+    ? el('button', { text: 'Add the top ' + Math.min(fr.want, fr.candidate_count) + " without Claude's check", onclick: async () => {
+      closeSheet();
+      try { const r = await api('/api/leads/find/add-unchecked', { job_id: fr.job_id }); toast('Added ' + r.added); await refresh(); } catch (err) { toast(err.message, true); }
+    } }) : null;
+  sheetCustom(ch === 'x' ? 'Find more X leads' : 'Find more people to connect with', [
     el('div', { class: 'sheet-label', text: 'For' }), campSeg,
     el('div', { class: 'sheet-label', text: 'How many' }), grid,
     el('div', { class: 'sheet-row' }, other),
     el('div', { class: 'sheet-row' }, go),
-    el('div', { class: 'sheet-note', text: 'Fresh launches from Peerlist, Uneed and Fazier. Only makers who listed their own LinkedIn, product site checked, nobody you already contacted. Claude checks the fit before they show up here, in a few minutes.' }),
+    el('div', { class: 'sheet-note', text: ch === 'x'
+      ? 'Founders on X who fit this campaign, nobody you already contacted. Claude checks the fit before they show up in To send, in a few minutes.'
+      : 'Fresh launches from Peerlist, Uneed and Fazier. Only makers who listed their own LinkedIn, product site checked, nobody you already contacted. Claude checks the fit before they show up here, in a few minutes.' }),
     status ? el('div', { class: 'sheet-note', text: 'Last run: ' + status }) : null,
+    unchecked,
   ].filter(Boolean));
 }
 
@@ -2007,7 +2021,21 @@ function findStatusText(ch) {
  * Bars at the top of each outreach tab. Effort goals are per day (requests,
  * messages, DMs), replies per week because they are not in his hands. The
  * connect goal sits under the 25 cap, which stays the warning line. */
-const GOALS = { goal_li_connect: 20, goal_li_message: 10, goal_x: 20, goal_replies: 5 };
+const GOALS = { goal_li_connect: 20, goal_li_message: 10, goal_x: 20, goal_replies: 5, goal_posts: 20 };
+/* Replies tab: the same goal bars and chip row as the outreach tabs. */
+function replyStrip() {
+  const today = localStamp().slice(0, 10);
+  const since = localStamp(new Date(Date.now() - 7 * 86400000));
+  const posted = state.items.filter((i) => i.status === 'posted' && i.posted_ts);
+  const day = goalOf('goal_posts');
+  const row = el('div', { class: 'li-status' },
+    el('button', { class: 'pill-chip', text: '↩ Replies to you', title: 'Find replies people left for you that you have not answered',
+      onclick: () => { showSeg('waiting'); $('mentionsBtn').click(); } }),
+    el('button', { class: 'pill-chip find', text: '+ Find posts', onclick: () => showTab('scout') }));
+  return [drawGoals([
+    ['Posted today', posted.filter((i) => i.posted_ts.slice(0, 10) === today).length, day],
+    ['Posted this week', posted.filter((i) => i.posted_ts >= since).length, day * 7]]), row];
+}
 function goalOf(k) { const v = parseInt(LS.get(k, ''), 10); return Number.isFinite(v) && v > 0 ? v : GOALS[k]; }
 function repliesThisWeek(ch) {
   const since = localStamp(new Date(Date.now() - 7 * 86400000));
@@ -2015,12 +2043,14 @@ function repliesThisWeek(ch) {
 }
 function goalBars(ch) {
   const s = dm.stats[ch] || {};
-  const bars = ch === 'linkedin'
+  return drawGoals(ch === 'linkedin'
     ? [['Requests today', s.requested_today || 0, goalOf('goal_li_connect')],
        ['Messages today', s.sent_today || 0, goalOf('goal_li_message')],
        ['Replies this week', repliesThisWeek(ch), goalOf('goal_replies')]]
     : [['DMs today', s.sent_today || 0, goalOf('goal_x')],
-       ['Replies this week', repliesThisWeek(ch), goalOf('goal_replies')]];
+       ['Replies this week', repliesThisWeek(ch), goalOf('goal_replies')]]);
+}
+function drawGoals(bars) {
   return el('div', { class: 'goals' }, ...bars.map(([label, n, goal]) => {
     const fill = el('div', { class: 'goal-fill' });
     fill.style.width = Math.min(100, Math.round(100 * n / goal)) + '%';
@@ -2031,43 +2061,103 @@ function goalBars(ch) {
   }));
 }
 
-function liStatus(mode) {
-  const s = dm.stats.linkedin || {};
-  const c = paceCfg('linkedin', mode);
-  const p = paceState('linkedin', mode);
+/* The chip row under the goal bars, the same on LinkedIn and X DM: the daily
+ * cap, the session, the countdown to the next send, and Find more. */
+function statusChips(ch, mode) {
+  const s = dm.stats[ch] || {};
+  const c = paceCfg(ch, mode);
+  const p = paceState(ch, mode);
   const done = mode === 'connect' ? (s.requested_today || 0) : (s.sent_today || 0);
-  const ss = sessionOf('linkedin', mode);
+  const ss = sessionOf(ch, mode);
   const row = el('div', { class: 'li-status' });
   row.append(el('span', { class: 'pill-chip' + (done >= c.cap ? ' warn' : ''),
     // The goal bar above shows progress; this chip is the warning line.
     text: 'Max ' + c.cap + (done >= c.cap ? ' reached' : '') }));
-  row.append(el('button', { class: 'pill-chip' + (p.sessionDone ? ' ok' : ss ? ' accent' : ''), onclick: () => openSessionSheet('linkedin', mode),
-    text: ss && ss.target ? 'Session ' + sessionCount('linkedin', mode, ss) + '/' + ss.target : '+ Session' }));
+  row.append(el('button', { class: 'pill-chip' + (p.sessionDone ? ' ok' : ss ? ' accent' : ''), onclick: () => openSessionSheet(ch, mode),
+    text: ss && ss.target ? 'Session ' + sessionCount(ch, mode, ss) + '/' + ss.target : '+ Session' }));
   if (mode === 'message' && p.wait) row.append(el('span', { class: 'pill-chip li-next', text: 'Next in ' + mmss(p.wait) }));
+  if (p.cool) {
+    row.append(el('button', { class: 'pill-chip warn', text: 'Cooling down · Clear', onclick: () => sheet('End the cooldown early?', [{ label: 'Yes, ' + DM_NAME[ch] + ' is sending again', run: async () => {
+      try { const r = await api('/api/dm/cooldown/clear', { channel: ch }); dm.stats = r.stats; renderDm(ch); } catch (e) { toast(e.message, true); }
+    } }]) }));
+  }
   // Find more on both lists: the people it finds land in Connect (they need a
   // request first), but he should not have to switch lists to start a search.
   {
     const job = dm.find && dm.find.job;
-    const busy = job && ACTIVE.includes(job.status) && dm.find.run && dm.find.run.channel === 'linkedin';
-    row.append(el('button', { class: 'pill-chip find' + (busy ? ' busy' : ''), onclick: openFindSheet,
+    const busy = job && ACTIVE.includes(job.status) && dm.find.run && dm.find.run.channel === ch;
+    row.append(el('button', { class: 'pill-chip find' + (busy ? ' busy' : ''), onclick: () => openFindSheet(ch),
       text: busy ? 'Finding…' : '+ Find more' }));
   }
   const nodes = [row];
-  if (p.capped) {
+  if (p.cool) {
+    nodes.push(el('div', { class: 'li-warn', text: p.text }));
+  } else if (p.capped) {
     nodes.push(el('div', { class: 'li-warn', text: mode === 'connect'
       ? "That's " + done + ' requests today. LinkedIn signed you out after about 82 on Sep 28, so stop here for today.'
       : "That's your daily message cap. More today raises the spam risk." }));
   } else if (p.sessionDone) {
     nodes.push(el('div', { class: 'li-warn ok', text: 'Session done: ' + ss.target + ' ' + (mode === 'connect' ? 'requests' : 'messages') + '. Nice.' }));
   }
-  if (mode === 'connect') {
-    const t = findStatusText('linkedin');
+  if (mode === 'connect' || ch === 'x') {
+    const t = findStatusText(ch);
     const job = dm.find && dm.find.job;
     if (t && job && (ACTIVE.includes(job.status) || Date.now() - tsMs(dm.find.run.ts) < 3 * 3600e3)) {
-      nodes.push(el('button', { class: 'find-line', onclick: openFindSheet, text: 'Find more: ' + t }));
+      nodes.push(el('button', { class: 'find-line', onclick: () => openFindSheet(ch), text: 'Find more: ' + t }));
     }
   }
   return nodes;
+}
+function liStatus(mode) { return statusChips('linkedin', mode); }
+
+/* Shuffle all: every message waiting in this list gets another version (or a
+ * fresh draw of lines), and no two people end up with the same text. Messages
+ * he edited by hand are left alone. One Undo puts every one back. */
+async function shuffleAll(list, btn) {
+  const mine = list.filter((l) => l.status === 'ready' && typeof l.draft_text !== 'string'
+    && ((l.variants && l.variants.length > 1) || libOf(l)));
+  const edited = list.filter((l) => typeof l.draft_text === 'string').length;
+  if (!mine.length) { toast(edited ? 'Only hand-edited messages here. Those are left as they are.' : 'Nothing here has another version'); return; }
+  const prev = mine.map((l) => ({ l, pick: l.pick || null, variant_index: l.variant_index || 0 }));
+  const taken = new Set(dm.leads.filter((x) => x.status === 'ready' && !mine.includes(x)).map(messageOf));
+  for (const l of mine) {
+    if (l.variants && l.variants.length > 1) {
+      const n = l.variants.length;
+      const cur = (l.variant_index || 0) % n;
+      l.variant_index = (cur + 1 + Math.floor(Math.random() * (n - 1))) % n;
+    } else {
+      const lib = libOf(l);
+      const cur = messageOf(l);
+      let k = null;
+      for (let t = 0; t < 60; t++) {
+        k = drawLines(lib, l, Math.random);
+        const txt = composeLines(lib, l, k);
+        if (txt !== cur && !taken.has(txt)) break;
+      }
+      l.pick = k;
+    }
+    taken.add(messageOf(l));
+  }
+  const ch = mine[0].channel;
+  renderDm(ch);
+  const done = btn ? busy(btn, 'Shuffling…') : () => {};
+  let saved = 0;
+  try {
+    // One at a time: each save rewrites the leads file on the server.
+    for (const l of mine) { await dmSave(l, { pick: l.pick || null, variant_index: l.variant_index || 0, draft_text: null }, true); saved++; }
+  } catch (e) { toast('Shuffled ' + saved + ' of ' + mine.length + ', then stopped: ' + e.message, true); done(); return; }
+  done();
+  toast('Shuffled ' + saved + (edited ? ' · ' + edited + ' you edited left as they are' : ''), false, { label: 'Undo', run: async () => {
+    for (const p of prev) { p.l.pick = p.pick; p.l.variant_index = p.variant_index; }
+    renderDm(ch);
+    try { for (const p of prev) await dmSave(p.l, { pick: p.pick, variant_index: p.variant_index, draft_text: null }, true); toast('Back to how they were'); }
+    catch (e) { toast(e.message, true); }
+  } });
+}
+function shuffleChip(list) {
+  const n = list.filter((l) => l.status === 'ready' && ((l.variants && l.variants.length > 1) || libOf(l))).length;
+  return n ? el('button', { class: 'pill-chip', text: '🎲 Shuffle all', title: 'Give every waiting message another version',
+    onclick: (e) => sheet('Shuffle ' + n + ' messages?', [{ label: '🎲 Shuffle all ' + n, run: () => shuffleAll(list, e.target) }]) }) : null;
 }
 
 function liPill(text, cls) { return text ? el('span', { class: 'tier-pill ' + (cls || ''), text }) : null; }
@@ -2403,7 +2493,10 @@ function messageFocus(list, nodes) {
   if (chips) card.append(chips);
   const { ta, count } = messageBox(l);
   const files = attachmentChips(l);
-  card.append(ta, el('div', { class: 'focus-meta' }, el('span', { class: 'muted small', text: 'Tap the text to edit' }), el('span', { class: 'spacer' }), count));
+  const canShuffle = (l.variants && l.variants.length > 1) || libOf(l);
+  card.append(ta, el('div', { class: 'focus-meta' },
+    canShuffle ? el('button', { class: 'link', text: '🎲 Another version', onclick: () => dmShuffle(l) }) : el('span', { class: 'muted small', text: 'Tap the text to edit' }),
+    el('span', { class: 'spacer' }), count));
   if (files) card.append(files);
   card.append(el('div', { class: 'focus-meta' },
     el('button', { class: 'link', text: '✎ Tell Claude what to change', onclick: () => tellClaude(l, ta) }),
@@ -2520,9 +2613,12 @@ function renderLinkedIn(root) {
         el('button', { class: li.aud === k ? 'on' : '', text: label + ' (' + n + ')', onclick: () => {
           li.aud = k; LS.set('li_aud', k); li.focus.message = null; li.q = ''; renderDm(ch); window.scrollTo(0, 0);
         } })));
-    nodes.push(el('div', { class: 'view-row' }, viewToggle('message', writable.length), audToggle, el('span', { class: 'spacer' }),
+    // Row one picks what is shown, row two acts on the whole list.
+    nodes.push(el('div', { class: 'view-row' }, viewToggle('message', writable.length), audToggle));
+    const acts = [shuffleChip(writable.filter(hasMessage)),
       writable.length ? el('button', { class: 'pill-chip', text: '✎ Fix all', title: 'The whole batch is wrong: rewrite all with a note', onclick: () => fixAllMessages(writable.filter((l) => l.variants && l.variants.length).length) }) : null,
-      campFilterChip(camps)));
+      campFilterChip(camps)].filter(Boolean);
+    if (acts.length) nodes.push(el('div', { class: 'view-row' }, ...acts));
     if (li.aud === 'icp' && waitingPdf) nodes.push(el('p', { class: 'hint', text: waitingPdf + (waitingPdf === 1 ? ' buyer is' : ' buyers are') + ' waiting on a report PDF. They have no message on purpose.' }));
     if (li.view.message === 'list') messageList(writable, nodes); else messageFocus(writable, nodes);
   } else {
@@ -2570,8 +2666,8 @@ function renderDm(ch, keepLinesOpenFor) {
         } }, label, n ? el('b', { text: ' ' + n }) : null))));
   }
 
-  if (ch === 'x') nodes.push(goalBars('x'));
-  nodes.push(paceStrip(ch, mode));
+  if (ch === 'x') nodes.push(goalBars('x'), ...statusChips('x', mode));
+  else nodes.push(paceStrip(ch, mode));
 
   const camps = [...new Set(mine.filter((l) => ['ready', 'sent', 'requested'].includes(l.status)).map((l) => l.campaign))].filter(Boolean);
   if (dm.camp[ch] && !camps.includes(dm.camp[ch])) dm.camp[ch] = '';
@@ -2622,8 +2718,9 @@ function renderDm(ch, keepLinesOpenFor) {
 
   const which = dm.seg[ch];
   if (which === 'send') {
-    if (ch === 'x') nodes.push(findCard(ch));
     if (needs.length) nodes.push(needsCard(ch, needs));
+    const shuf = shuffleChip(writable);
+    if (shuf) nodes.push(el('div', { class: 'view-row' }, el('span', { class: 'spacer' }), shuf));
     nodes.push(el('p', { class: 'hint', text: ch === 'x'
       ? 'Open the profile first: check the product and that their DMs are open. One DM, one gap, then the next. Stop the batch if X ever says Failed.'
       : 'Check the chat first. If an older message already went out, change the first line before you send.' }));
@@ -2672,13 +2769,14 @@ function renderDmAll() {
 }
 
 /* -- pacing settings -- */
-[['goalLiConnect', 'goal_li_connect', 20], ['goalLiMsg', 'goal_li_message', 10], ['goalX', 'goal_x', 20], ['goalReplies', 'goal_replies', 5],
+[['goalLiConnect', 'goal_li_connect', 20], ['goalLiMsg', 'goal_li_message', 10], ['goalX', 'goal_x', 20], ['goalReplies', 'goal_replies', 5], ['goalPosts', 'goal_posts', 20],
   ['capX', 'cap_x', 20], ['capLi', 'cap_linkedin', 20], ['capConnect', 'cap_connect', 25], ['gapMin', 'gapmin', 1], ['gapMax', 'gapmax', 9]].forEach(([id, key, d]) => {
   $(id).value = LS.get(key, String(d));
   $(id).addEventListener('change', () => {
     const v = parseInt($(id).value, 10);
     if (Number.isFinite(v) && v >= 0) LS.set(key, String(v)); else $(id).value = LS.get(key, String(d));
     renderDmAll();
+    renderReplies();
   });
 });
 

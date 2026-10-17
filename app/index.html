@@ -35,6 +35,7 @@
   <main>
     <!-- REPLIES -->
     <section data-panel="replies">
+      <div id="replyStrip" class="top-strip"></div>
       <div class="seg" role="tablist">
         <button data-seg="ready" class="on">Ready <b id="readyCount"></b></button>
         <button data-seg="waiting">Waiting <b id="waitingCount"></b></button>
@@ -107,8 +108,9 @@
           <label>LinkedIn messages a day<input id="goalLiMsg" type="number" inputmode="numeric" min="1" max="100"></label>
           <label>X DMs a day<input id="goalX" type="number" inputmode="numeric" min="1" max="100"></label>
           <label>Replies a week (each)<input id="goalReplies" type="number" inputmode="numeric" min="1" max="100"></label>
+          <label>X replies posted a day<input id="goalPosts" type="number" inputmode="numeric" min="1" max="200"></label>
         </div>
-        <div class="small muted">The bars at the top of the LinkedIn and X DM tabs. Goals are what you aim for; the caps below are where the warnings start.</div>
+        <div class="small muted">The bars at the top of the Replies, LinkedIn and X DM tabs. Goals are what you aim for; the caps below are where the warnings start.</div>
       </div>
       <h3>Outreach pacing</h3>
       <div class="card form">
