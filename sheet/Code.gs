@@ -97,7 +97,20 @@ function pool_(sh, h, rows) {
   return out;
 }
 
+/* Run THIS one from the editor (pick checkSetup next to Run) to test the
+ * setup: the token, the tab and its columns, and how many free people the
+ * Leads tab holds. doGet and doPost only work when the sidekick calls them. */
+function checkSetup() {
+  if (!props_().getProperty('TOKEN')) throw new Error('No TOKEN yet: Project Settings > Script properties > add TOKEN.');
+  var sh = tab_(), h = header_(sh), last = sh.getLastRow();
+  var rows = last > 1 ? sh.getRange(2, 1, last - 1, h.width).getDisplayValues() : [];
+  var free = pool_(sh, h, rows);
+  Logger.log('OK. TOKEN is set. Tab "' + sh.getName() + '" has ' + rows.length + ' rows and every column the sidekick needs. '
+    + free.length + ' people are free to take. Now: Deploy > New deployment > Web app.');
+}
+
 function doGet(e) {
+  if (!e || !e.parameter) return out_({ error: 'doGet runs when the sidekick calls the web app. To test in the editor, run checkSetup.' });
   if (!authed_(e.parameter.token)) return out_({ error: 'wrong or missing token' });
   var sh = tab_(), h = header_(sh), last = sh.getLastRow();
   var rows = last > 1 ? sh.getRange(2, 1, last - 1, h.width).getDisplayValues() : [];
@@ -111,6 +124,7 @@ function doGet(e) {
 }
 
 function doPost(e) {
+  if (!e || !e.postData) return out_({ error: 'doPost runs when the sidekick calls the web app. To test in the editor, run checkSetup.' });
   var body = JSON.parse(e.postData.contents || '{}');
   if (!authed_(body.token)) return out_({ error: 'wrong or missing token' });
   var incoming = body.rows || [];
