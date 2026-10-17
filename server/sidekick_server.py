@@ -758,6 +758,14 @@ def dm_stats(leads, state):
             "last_requested_ts": asked[0] if asked else None,
             "needs_message": sum(1 for l in mine if l.get("needs_message") and l.get("status") == "ready"),
         }
+        if ch == "linkedin":
+            # LinkedIn's weekly invitation limit, as he reported it on the phone.
+            pause = state.get("connect_pause") or {}
+            live = (pause.get("until") or 0) > now
+            out[ch].update(connect_pause_until=pause.get("until") if live else None,
+                           connect_pause_since=pause.get("ts") if live else None,
+                           connect_pause_sent_7d=pause.get("requested_7d") if live else None,
+                           limit_hits=(state.get("limit_hits") or [])[:5])
     return out
 
 
@@ -1757,6 +1765,26 @@ def agent_write_dm(job, body):
             lead["updated_ts"] = now_str()
         save_dm_leads(leads)
     return 200, {"ok": True, "written": written}
+
+
+def dm_connect_pause(body):
+    """He hit LinkedIn's weekly invitation limit: pause connect requests for
+    N days (0 ends it). Each hit is kept with how many requests went out in
+    the 7 days before it, so the real limit shows up over time."""
+    days = clamp_int(body.get("days"), 0, 14, 7)
+    with LOCK:
+        st = load_dm_state()
+        if days:
+            sent7 = dm_stats(load_dm_leads(), st)["linkedin"]["requested_7d"]
+            st["connect_pause"] = {"ts": now_str(), "until": time.time() + days * 86400, "requested_7d": sent7}
+            hits = st.setdefault("limit_hits", [])
+            hits.insert(0, {"ts": now_str(), "requested_7d": sent7, "days": days})
+            st["limit_hits"] = hits[:50]
+        else:
+            st.pop("connect_pause", None)
+        save_dm_state(st)
+        stats = dm_stats(load_dm_leads(), st)
+    return 200, {"ok": True, "stats": stats}
 
 
 def dm_cooldown_clear(body):
@@ -4109,6 +4137,8 @@ class AppHandler(BaseHandler):
                 return self._json(*sync_get(body))
             if path == "/api/sync/put":
                 return self._json(*sync_put(body))
+            if path == "/api/dm/connect-pause":
+                return self._json(*dm_connect_pause(body))
             if path == "/api/dm/cooldown/clear":
                 return self._json(*dm_cooldown_clear(body))
             if path == "/api/draft":

@@ -1269,6 +1269,9 @@ function paceState(ch, mode = modeOf(ch)) {
     text += ' · session ' + n + '/' + ss.target;
     sessionDone = n >= ss.target;
   }
+  if (mode === 'connect' && s.connect_pause_until && s.connect_pause_until * 1000 > now) {
+    return { cls: 'err', text: 'Weekly limit · paused until ' + dayName(s.connect_pause_until * 1000), paused: true };
+  }
   if (mode === 'message' && s.cooldown_until && s.cooldown_until * 1000 > now) {
     return { cls: 'err', text: 'Cooling down ' + mmss(s.cooldown_until * 1000 - now) + ' · ' + DM_NAME[ch] + ' said Failed. Stop the batch.', cool: true };
   }
@@ -1284,6 +1287,7 @@ function paceState(ch, mode = modeOf(ch)) {
 function paceGate(ch, mode = modeOf(ch)) {
   const p = paceState(ch, mode);
   if (p.cool) return { title: DM_NAME[ch] + ' blocked a send. Sending during the cooldown risks a longer block or a label.', go: 'Send anyway' };
+  if (p.paused) return { title: "You hit LinkedIn's weekly invitation limit. Requests sent now usually fail, and pushing it can get the account restricted.", go: 'Open anyway' };
   // Connect requests past the cap open straight away: the pill already says the cap is reached.
   if (p.capped) return mode === 'connect' ? null : { title: "That's your daily cap. More today raises the spam risk.", go: 'Send anyway' };
   if (p.sessionDone) return { title: 'You planned ' + sessionOf(ch, mode).target + ' for this session and they are done.', go: 'Keep going' };
@@ -1807,6 +1811,7 @@ function connectMenu(l) {
   if (l.claude_url) acts.push({ label: 'Open the Claude chat that found them ↗', run: () => window.open(l.claude_url, '_blank', 'noopener') });
   if (l.site) acts.push({ label: 'Open their site', run: () => window.open(l.site, '_blank', 'noopener') });
   if (l.status === 'ready') {
+    acts.push({ label: 'LinkedIn says weekly limit reached', run: () => weeklyLimitSheet(paceState('linkedin', 'connect').paused) });
     acts.push({ label: 'Already connected (move to Message)', run: () => dmStatus(l, 'accepted', {}, (l.name || 'They') + ' moved to Message', { kind: 'connect', status: 'ready' }) });
     acts.push({ label: "Can't connect (dead link, no button)", danger: true, run: () => dmStatus(l, 'cant_dm', { reason: "couldn't connect" }, 'Moved to Done', 'ready') });
   }
@@ -2148,6 +2153,11 @@ function statusChips(ch, mode) {
   row.append(el('button', { class: 'pill-chip' + (p.sessionDone ? ' ok' : ss ? ' accent' : ''), onclick: () => openSessionSheet(ch, mode),
     text: ss && ss.target ? 'Session ' + sessionCount(ch, mode, ss) + '/' + ss.target : '+ Session' }));
   if (mode === 'message' && p.wait) row.append(el('span', { class: 'pill-chip li-next', text: 'Next in ' + mmss(p.wait) }));
+  if (ch === 'linkedin' && mode === 'connect') {
+    row.append(p.paused
+      ? el('button', { class: 'pill-chip warn', text: 'Paused · ' + dayName(s.connect_pause_until * 1000), onclick: () => weeklyLimitSheet(true) })
+      : el('button', { class: 'pill-chip', text: 'Weekly limit?', title: "LinkedIn says you reached the weekly invitation limit", onclick: () => weeklyLimitSheet(false) }));
+  }
   if (p.cool) {
     row.append(el('button', { class: 'pill-chip warn', text: 'Cooling down · Clear', onclick: () => sheet('End the cooldown early?', [{ label: 'Yes, ' + DM_NAME[ch] + ' is sending again', run: async () => {
       try { const r = await api('/api/dm/cooldown/clear', { channel: ch }); dm.stats = r.stats; renderDm(ch); } catch (e) { toast(e.message, true); }
@@ -2162,7 +2172,11 @@ function statusChips(ch, mode) {
       text: busy ? 'Finding…' : '+ Find more' }));
   }
   const nodes = [row];
-  if (p.cool) {
+  if (p.paused) {
+    nodes.push(el('div', { class: 'li-warn', text: "LinkedIn's weekly invitation limit. Connects are paused until " + dayName(s.connect_pause_until * 1000)
+      + (s.connect_pause_sent_7d != null ? '. You had sent ' + s.connect_pause_sent_7d + ' requests in the 7 days before it hit.' : '.')
+      + ' Message mode still works.' }));
+  } else if (p.cool) {
     nodes.push(el('div', { class: 'li-warn', text: p.text }));
   } else if (p.capped) {
     nodes.push(el('div', { class: 'li-warn', text: mode === 'connect'
@@ -2181,6 +2195,33 @@ function statusChips(ch, mode) {
   return nodes;
 }
 function liStatus(mode) { return statusChips('linkedin', mode); }
+
+function dayName(ms) { return new Date(ms).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }); }
+/* LinkedIn said "you've reached the weekly invitation limit". He reports it
+ * here; connects pause for the days he picks and every Open warns first. */
+function weeklyLimitSheet(paused) {
+  const s = dm.stats.linkedin || {};
+  const set = async (days) => {
+    try {
+      const r = await api('/api/dm/connect-pause', { days });
+      dm.stats = r.stats; renderDm('linkedin');
+      toast(days ? 'Connects paused until ' + dayName(Date.now() + days * 86400000) : 'Connects back on');
+    } catch (e) { toast(e.message, true); }
+  };
+  if (paused) {
+    sheet('Paused until ' + dayName(s.connect_pause_until * 1000), [{ label: 'LinkedIn lets me connect again, resume now', run: () => set(0) },
+      { label: 'Pause 2 more days', run: () => set(Math.ceil((s.connect_pause_until * 1000 - Date.now()) / 86400000) + 2) }]);
+    return;
+  }
+  const hits = (s.limit_hits || []).filter((h) => h.requested_7d != null);
+  sheetCustom('Hit the weekly limit?', [
+    el('div', { class: 'sheet-note', text: "When LinkedIn says you've reached the weekly invitation limit, pause connects here. You've sent "
+      + (s.requested_7d || 0) + ' requests in the last 7 days.' + (hits.length ? ' Last time it hit at ' + hits[0].requested_7d + '.' : '')
+      + ' The limit counts a rolling week, so the oldest requests drop off day by day.' }),
+    el('div', { class: 'sheet-label', text: 'Pause connects for' }),
+    el('div', { class: 'sheet-grid' }, ...[2, 3, 5, 7].map((d) => el('button', { text: d + ' days', onclick: () => { closeSheet(); set(d); } }))),
+  ]);
+}
 
 /* Shuffle all: every message waiting in this list gets another version (or a
  * fresh draw of lines), and no two people end up with the same text. Messages
