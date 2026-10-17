@@ -407,6 +407,24 @@ def cmd_status(args):
         len(sends), sum(1 for s in sends if s.get("replied"))))
 
 
+def cmd_reports(args):
+    """Buyers he asked a report PDF for from the phone (Make the PDF), oldest
+    first. The PDF is built on the Mac (websites/supacite/tools/ai-visibility-report),
+    then attached to the lead with `load --messages`."""
+    leads = load(os.path.join(data_dir(args.data), "dm-leads.json"), "leads", [])
+    want = sorted((l for l in leads if l.get("report_requested") and not any(
+        "report" in str(a.get("label") or a.get("file") or "").lower() for a in l.get("attachments") or [])),
+        key=lambda l: l["report_requested"])
+    if args.json:
+        print(json.dumps([{k: l.get(k) for k in ("id", "name", "product", "site", "profile_url", "campaign", "icp",
+                                                  "headline", "tagline", "source", "report_requested", "research")}
+                          for l in want], indent=1, ensure_ascii=False))
+        return
+    print("%d report PDFs requested from the phone" % len(want))
+    for l in want:
+        print("  %s  %s · %s  %s  (asked %s)" % (l["id"], l.get("name"), l.get("product"), l.get("site") or "", l["report_requested"]))
+
+
 def cmd_campaign(args):
     """Save one campaign's rules. The JSON names a markdown rules file next to it:
     {"id", "label", "channels": [...], "find": {...}, "rules_file": "x.md"}."""
@@ -492,6 +510,8 @@ def main():
     p.add_argument("--campaign")
     p.add_argument("--json", action="store_true")
     sub.add_parser("status")
+    p = sub.add_parser("reports", help="report PDFs requested from the phone")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("retire")
     p.add_argument("--batch", required=True)
     p.add_argument("--dry-run", action="store_true")
@@ -502,7 +522,7 @@ def main():
     args = ap.parse_args()
     {"load": cmd_load, "library": cmd_library, "export": cmd_export,
      "status": cmd_status, "retire": cmd_retire, "campaign": cmd_campaign,
-     "touched": cmd_touched}[args.cmd](args)
+     "touched": cmd_touched, "reports": cmd_reports}[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -1338,6 +1338,7 @@ function takeDm(d) {
   dm.stats = d.stats || {};
   dm.campaigns = d.campaigns || {};
   dm.versions = d.versions || {};
+  dm.templates = d.templates || {};
   buildDmDefaults();
 }
 
@@ -1732,6 +1733,10 @@ function dmMenu(l, ta) {
   if (['ready', 'sent'].includes(l.status)) {
     acts.push(snoozed(l) ? { label: 'Wake up (snoozed until ' + l.snooze_until + ')', run: () => snoozeLeads([l], '') }
       : { label: '💤 Snooze…', run: () => snoozeSheet([l]) });
+  }
+  if (canResearch(l) && !l.writing_job) acts.push({ label: '🔎 Research + write message', run: () => researchLeads([l]) });
+  if (l.channel === 'linkedin' && isIcp(l) && pdfPending(l)) {
+    acts.push(l.report_requested ? { label: 'Cancel the PDF request', run: () => requestPdf([l], false) } : { label: '📄 Make the PDF', run: () => requestPdf([l]) });
   }
   if (l.channel === 'linkedin' && kindOf(l) === 'message' && ['ready', 'sent'].includes(l.status)) {
     acts.push(isIcp(l) ? { label: 'Move to Non-ICP', run: () => setIcp([l], 'light') }
@@ -2690,8 +2695,8 @@ function pdfWaitingCard(list, i, nodes) {
   card.append(focusHeader(i, list.length, l),
     el('div', { class: 'focus-name', text: l.name || 'LinkedIn lead' }),
     l.product ? el('div', { class: 'focus-product', text: l.product }) : null,
-    pdfBadge(l), dmFlags(l, ''),
-    el('p', { class: 'hint', text: 'The four versions are written once the AI report is made for ' + (l.product || 'them') + '. Ask Claude on the Mac to make it.' }));
+    pdfBadge(l), pdfActions(l), dmFlags(l, ''),
+    el('p', { class: 'hint', text: 'The four versions are written once the AI report is made for ' + (l.product || 'them') + '.' }));
   if (l.ask_variants && l.ask_variants.length) {
     card.append(el('button', { class: 'btn block', text: 'Ask first instead (' + l.ask_variants.length + ' short versions)',
       title: 'Send a short message that asks before any research is done', onclick: () => setAsk(l, true) }));
@@ -2723,6 +2728,8 @@ function messageFocus(list, nodes) {
   if (opened) card.append(el('div', { class: 'focus-hint', text: 'Sent it? Tap Sent. Changed it in LinkedIn? Paste what you sent over the text first.' }));
   const badge = pdfBadge(l);
   if (badge) card.append(badge);
+  const pa = pdfActions(l);
+  if (pa) card.append(pa);
   card.append(dmFlags(l, ''));
   const chips = variantChips(l);
   if (chips) card.append(chips);
@@ -2854,6 +2861,7 @@ function renderLinkedIn(root) {
     // Row one picks what is shown, row two acts on the whole list.
     nodes.push(el('div', { class: 'view-row' }, viewToggle('message', writable.length), audToggle));
     const acts = [shuffleChip(writable.filter(hasMessage)), snoozeChip(sleeping),
+      Object.keys(dm.templates || {}).length ? el('button', { class: 'pill-chip', text: '✎ Templates', onclick: openTemplates }) : null,
       writable.length ? el('button', { class: 'pill-chip', text: '✎ Fix all', title: 'The whole batch is wrong: rewrite all with a note', onclick: () => fixAllMessages(writable.filter((l) => l.variants && l.variants.length).length) }) : null,
       campFilterChip(camps)].filter(Boolean);
     if (acts.length) nodes.push(el('div', { class: 'view-row' }, ...acts));
@@ -2873,6 +2881,96 @@ function renderLinkedIn(root) {
   root.replaceChildren(...nodes);
 }
 
+
+/* ================= message templates =================
+ * The fixed versions (Try it, Your take, Can I) every Non-ICP message is
+ * built from. He edits one here; it is used for every message written from
+ * now on, and he can also rewrite the ones already waiting. */
+const SET_NAMES = { light: 'Non-ICP notes' };
+function templateCampaign() {
+  const keys = Object.keys(dm.templates || {});
+  return keys.includes(dm.camp.linkedin) ? dm.camp.linkedin : keys.includes('supacite') ? 'supacite' : keys[0];
+}
+function waitingFor(camp, set, label) {
+  return dm.leads.filter((l) => l.status === 'ready' && l.campaign === camp && (set === 'light' ? l.icp === 'light' : true)
+    && (l.variants || []).some((v) => v.label === label));
+}
+function openTemplates() {
+  const camp = templateCampaign();
+  const sets = (dm.templates || {})[camp] || {};
+  if (!camp || !Object.keys(sets).length) { toast('No templates yet. Update the server on this device.', true); return; }
+  const nodes = [el('div', { class: 'sheet-note', text: 'Write {first}, {product}, {category} or {source} where each person\'s details go. Everything else is sent word for word.' })];
+  for (const [set, rows] of Object.entries(sets)) {
+    nodes.push(el('div', { class: 'sheet-label', text: (SET_NAMES[set] || set) + ' · ' + ((dm.campaigns[camp] && dm.campaigns[camp].label) || camp) }));
+    for (const t of rows) {
+      const ta = el('textarea', { class: 'tell-box tpl-box', rows: 7 });
+      ta.value = t.text;
+      const chars = el('span', { class: 'muted small' });
+      const draw = () => { chars.textContent = ta.value.trim().length + ' chars'; };
+      ta.addEventListener('input', draw); draw();
+      const save = el('button', { class: 'btn primary sm', text: 'Save', onclick: () => saveTemplate(camp, set, t.label, ta.value, t.text) });
+      nodes.push(el('div', { class: 'tpl' }, el('div', { class: 'tpl-head' }, el('b', { text: t.label }), el('span', { class: 'spacer' }), chars, save), ta));
+    }
+  }
+  sheetCustom('Message templates', nodes);
+}
+function saveTemplate(camp, set, label, text, before) {
+  text = text.replace(/\r\n/g, '\n').trim();
+  if (text === String(before).trim()) { toast('No change'); return; }
+  const bad = (text.match(/\{(\w+)\}/g) || []).filter((x) => !['{first}', '{product}', '{category}', '{source}'].includes(x));
+  if (bad.length) { toast('Unknown slot ' + bad[0] + '. Use {first}, {product}, {category} or {source}', true); return; }
+  const n = waitingFor(camp, set, label).filter((l) => typeof l.draft_text !== 'string').length;
+  const go = async (apply) => {
+    try {
+      const r = await api('/api/dm/templates', { campaign: camp, set, label, text, apply });
+      dm.templates = r.templates;
+      await refresh();
+      renderDm('linkedin');
+      toast('"' + label + '" saved' + (apply === 'all' ? ' · ' + r.updated + ' waiting messages updated'
+        + (r.kept_edits ? ', ' + r.kept_edits + ' you edited left as they are' : '') + (r.skipped ? ', ' + r.skipped + ' could not be matched' : '') : ' for new messages'));
+    } catch (e) { toast(e.message, true); }
+  };
+  sheet('Save "' + label + '"', [
+    { label: 'Use it for new messages only', run: () => go('future') },
+    ...(n ? [{ label: 'Also update the ' + n + ' waiting ' + (n === 1 ? 'message' : 'messages') + ' now', run: () => go('all') }] : []),
+  ]);
+}
+
+/* ================= buyers waiting on a report =================
+ * Two actions, kept small inside the card: research and write the no-PDF
+ * messages (only until that is done), and ask for the PDF (until it exists;
+ * it is built on the Mac). */
+function canResearch(l) {
+  return isIcp(l) && l.status === 'ready' && kindOf(l) === 'message' && !hasMessage(l) && !(l.ask_variants && l.ask_variants.length);
+}
+async function researchLeads(list) {
+  const ids = list.filter(canResearch).map((l) => l.id);
+  if (!ids.length) { toast('Already researched and written'); return; }
+  try {
+    const r = await api('/api/dm/write', { ids, research: true, channel: 'linkedin' });
+    toast('Claude is researching ' + r.leads + '. The messages show up here in a few minutes.');
+    await refresh();
+  } catch (e) { toast(e.message, true); }
+}
+async function requestPdf(list, on = true) {
+  const todo = list.filter((l) => pdfPending(l) && !!l.report_requested !== on);
+  let ok = 0;
+  try { for (const l of todo) { await dmSave(l, { report_request: on }, true); ok++; } } catch (e) { toast(e.message, true); }
+  li.sel.on = false; li.sel.ids.clear();
+  renderDm('linkedin');
+  toast(on ? (ok === 1 ? 'PDF requested for ' + dmWho(todo[0]) : ok + ' PDFs requested') + '. Claude makes it on the Mac.' : 'Request cancelled');
+}
+function pdfActions(l) {
+  if (!isIcp(l) || !pdfPending(l)) return null;
+  const row = el('div', { class: 'pdf-actions' });
+  if (l.writing_job) row.append(el('span', { class: 'muted small', text: 'Claude is researching and writing…' }));
+  else if (canResearch(l)) row.append(el('button', { class: 'link', text: '🔎 Research + write message', onclick: () => researchLeads([l]) }));
+  row.append(l.report_requested
+    ? el('button', { class: 'link muted-link', title: 'Tap to cancel the request', text: '📄 PDF requested · ' + agoText(l.report_requested),
+      onclick: () => sheet('PDF requested ' + agoText(l.report_requested), [{ label: 'Cancel the request', danger: true, run: () => requestPdf([l], false) }]) })
+    : el('button', { class: 'link', text: '📄 Make the PDF', onclick: () => requestPdf([l]) }));
+  return row;
+}
 
 /* ================= snooze, ICP moves, follow-ups, list select ================= */
 function todayStr() { return localStamp().slice(0, 10); }
@@ -3063,6 +3161,10 @@ function listTools(mode, list, nodes) {
     acts.push(el('button', { class: 'pill-chip warn', text: 'Skip ' + n, onclick: () => sheet('Skip ' + n + '?', [{ label: 'Skip ' + n, danger: true, run: () => bulkSkip(picked) }]) }));
     if (mode === 'message') {
       if (picked.some((l) => (l.variants && l.variants.length > 1) || libOf(l))) acts.push(el('button', { class: 'pill-chip', text: '🎲 Shuffle', onclick: (e) => shuffleAll(picked, e.target) }));
+      const rs = picked.filter((l) => canResearch(l) && !l.writing_job);
+      const pd = picked.filter((l) => isIcp(l) && pdfPending(l) && !l.report_requested);
+      if (rs.length) acts.push(el('button', { class: 'pill-chip', text: '🔎 Research ' + rs.length, onclick: () => researchLeads(rs) }));
+      if (pd.length) acts.push(el('button', { class: 'pill-chip', text: '📄 PDF ' + pd.length, onclick: () => requestPdf(pd) }));
       acts.push(el('button', { class: 'pill-chip', text: li.aud === 'icp' ? '→ Non-ICP' : '→ ICP',
         onclick: () => setIcp(picked, li.aud === 'icp' ? 'light' : 'founder') }));
     }
@@ -3378,6 +3480,7 @@ async function pushOn(btn) {
   pushShowState();
 }
 $('pushOn').addEventListener('click', (e) => pushOn(e.target));
+$('tplBtn').addEventListener('click', () => openTemplates());
 $('pushTest').addEventListener('click', async () => {
   try { const r = await api('/api/push/test', {}); toast(r.devices ? 'Sent to ' + r.devices + (r.devices === 1 ? ' device' : ' devices') : 'No device is subscribed yet. Tap Turn on first.', !r.devices); }
   catch (e) { toast(e.message, true); }

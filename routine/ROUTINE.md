@@ -451,6 +451,10 @@ connection that just accepted, or a found X lead).
    older one. A lead with `fix_note` is a rewrite he asked for: `previous_text`
    is what you wrote last time, `fix_note` says what was wrong. Change exactly
    that and keep what he did not complain about.
+   `templates`: message templates he edited in the app, `{campaign: {set:
+   [{label, text}]}}`. When a lead's set is there, write those versions from
+   these texts word for word, filling only `{first}`, `{product}`,
+   `{category}` and `{source}`. They beat the wording in the campaign rules.
 2. Draft in an Opus subagent (same model rule as replies). Follow the
    campaign's rules to the letter: version labels, length, what may be claimed,
    what must never be claimed. Run the humanizer pass

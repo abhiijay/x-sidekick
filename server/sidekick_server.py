@@ -681,6 +681,8 @@ DM_STATE_FILE = os.path.join(DATA_DIR, "dm-state.json")
 # Per-campaign rules (ICP, offer, how to write) sent to the routine in job
 # payloads. Private: it lives in the data dir, never in this public repo.
 DM_CAMPAIGNS_FILE = os.path.join(DATA_DIR, "dm-campaigns.json")
+# Message templates he edits in the app: {campaign: {set: [{label, text}]}}.
+DM_TEMPLATES_FILE = os.path.join(DATA_DIR, "dm-templates.json")
 # Everyone already contacted anywhere (LinkedIn slugs, X handles, names), so
 # "Find more" never brings back someone who was already connected or messaged.
 DM_TOUCHED_FILE = os.path.join(DATA_DIR, "dm-touched.json")
@@ -801,7 +803,8 @@ def dm_view():
     camps = {k: {"label": v.get("label") or k, "channels": v.get("channels") or list(DM_CHANNELS)}
              for k, v in load_dm_campaigns().items()}
     return {"leads": shown, "libraries": libs, "stats": dm_stats(leads, load_dm_state()),
-            "cooldown_min": DM_COOLDOWN_MIN, "campaigns": camps, "versions": version_stats(leads)}
+            "cooldown_min": DM_COOLDOWN_MIN, "campaigns": camps, "versions": version_stats(leads),
+            "templates": load_dm_templates(), "template_slots": list(TEMPLATE_SLOTS)}
 
 
 def version_label(sent_lines):
@@ -1055,6 +1058,112 @@ def dm_feedback_all(body):
     return code, res
 
 
+# The Non-ICP set as it stood in the SupaCite rules on 2026-10-16 (the
+# operator's page, word for word). Used until he edits them in the app.
+DEFAULT_TEMPLATES = {"supacite": {"light": [
+    {"label": "Try it", "text": "Hey {first}! Great to connect :) I'm building SupaCite, it shows whether ChatGPT recommends your product when buyers ask, and who it recommends instead. It runs via MCP or API, whatever works for you. There's a free check on it that takes about a minute, no sign-in. Would love your feedback on it!\n\nhttps://supacite.com/check\n\nlmk"},
+    {"label": "Your take", "text": "Hey {first}, hope you're well. I've been building SupaCite, which shows whether ChatGPT, Gemini and Perplexity recommend a product when buyers ask, and who they recommend instead. It runs via MCP or API, whatever works for you. People ask them about {category} too, so I'd love your take on it as a fellow builder with {product}. There's a free check on the site, takes about a minute. Curious what you think, even if it's critical.\n\nhttps://supacite.com/check"},
+    {"label": "Can I", "text": "Hey {first}, thanks for connecting! We built SupaCite, it shows whether ChatGPT recommends your product when buyers ask for one, and who it names instead. It runs via MCP or API, whatever works for you. Can I get you to try the free check on it? Takes about a minute.\n\nhttps://supacite.com/check"},
+]}}
+TEMPLATE_SETS = {"light": ("light",)}          # set name -> the icp values it is written for
+TEMPLATE_SLOTS = ("first", "product", "category", "source")
+
+
+def load_dm_templates():
+    t = _load(DM_TEMPLATES_FILE, "templates")
+    return t if isinstance(t, dict) and t else json.loads(json.dumps(DEFAULT_TEMPLATES))
+
+
+def template_regex(text):
+    """A template as a pattern that reads the filled-in slots back out of a
+    message written from it: "Hey {first}, ..." matches "Hey Samson, ..."."""
+    out, seen, pos = "", set(), 0
+    for m in re.finditer(r"\{(\w+)\}", text):
+        out += re.escape(text[pos:m.start()])
+        name = m.group(1)
+        if name in TEMPLATE_SLOTS:
+            out += "(?P=%s)" % name if name in seen else "(?P<%s>.+?)" % name
+            seen.add(name)
+        else:
+            out += re.escape(m.group(0))
+        pos = m.end()
+    return re.compile("^" + out + re.escape(text[pos:]) + "$", re.S)
+
+
+def lead_slots(lead):
+    f = lead.get("fields") or {}
+    return {"first": str(f.get("first") or (lead.get("name") or "").split(" ")[0] or "there"),
+            "product": str(f.get("p") or lead.get("product") or "").split(" | ")[0].strip(),
+            "category": str(f.get("category") or f.get("cat") or ""), "source": str(lead.get("source") or "")}
+
+
+def fill_template(text, slots):
+    missing = [n for n in re.findall(r"\{(\w+)\}", text) if n in TEMPLATE_SLOTS and not slots.get(n)]
+    if missing:
+        return None, missing
+    return re.sub(r"\{(\w+)\}", lambda m: slots.get(m.group(1), m.group(0)) if m.group(1) in TEMPLATE_SLOTS else m.group(0), text), []
+
+
+def dm_templates_save(body):
+    """He edited a template in the app. Saved for every message written from
+    now on; with apply "all" the waiting messages written from the old
+    version are rewritten too, each keeping its own name, product and
+    category (read back out of its current text). Hand-edited ones stay."""
+    camp, tset, label = str(body.get("campaign") or ""), str(body.get("set") or ""), str(body.get("label") or "")
+    text = str(body.get("text") or "").replace("\r\n", "\n").strip()
+    if not camp or tset not in TEMPLATE_SETS or not label:
+        return 400, {"error": "campaign, set and label required"}
+    if len(text) < 20:
+        return 400, {"error": "the template is too short"}
+    bad = [n for n in re.findall(r"\{(\w+)\}", text) if n not in TEMPLATE_SLOTS]
+    if bad:
+        return 400, {"error": "unknown slot {%s}. Use {first}, {product}, {category} or {source}" % bad[0]}
+    with LOCK:
+        allt = load_dm_templates()
+        rows = allt.setdefault(camp, {}).setdefault(tset, [])
+        old = next((r for r in rows if r.get("label") == label), None)
+        old_text = old["text"] if old else None
+        if old:
+            old["text"] = text
+        else:
+            rows.append({"label": label, "text": text})
+        _save(DM_TEMPLATES_FILE, allt, "templates")
+        done = kept = skipped = 0
+        if body.get("apply") == "all":
+            pat = template_regex(old_text) if old_text else None
+            leads = load_dm_leads()
+            for l in leads:
+                if (l.get("status") != "ready" or l.get("campaign") != camp
+                        or l.get("icp") not in TEMPLATE_SETS[tset]):
+                    continue
+                for v in l.get("variants") or []:
+                    if v.get("label") != label:
+                        continue
+                    if isinstance(l.get("draft_text"), str):
+                        kept += 1
+                        break
+                    slots = lead_slots(l)
+                    m = pat.match(v.get("text") or "") if pat else None
+                    if m:
+                        slots.update({k: x for k, x in m.groupdict().items() if x})
+                        if slots.get("category"):
+                            l.setdefault("fields", {})
+                            if isinstance(l["fields"], dict):
+                                l["fields"]["category"] = slots["category"]
+                    new, missing = fill_template(text, slots)
+                    if new is None:
+                        skipped += 1
+                    else:
+                        v["text"] = new
+                        l["updated_ts"] = now_str()
+                        done += 1
+                    break
+            if done:
+                save_dm_leads(leads)
+    PEER_WAKE.set()
+    return 200, {"ok": True, "templates": load_dm_templates(), "updated": done, "kept_edits": kept, "skipped": skipped}
+
+
 def load_dm_campaigns():
     c = _load(DM_CAMPAIGNS_FILE, "campaigns")
     return c if isinstance(c, dict) else {}
@@ -1195,6 +1304,12 @@ def dm_update(body):
                         lead["needs_message"] = True
                 lead["variant_index"] = 0
                 lead.pop("draft_text", None)
+        # He asked for the report PDF from the phone; the Mac builds it.
+        if "report_request" in body:
+            if body.get("report_request"):
+                lead["report_requested"] = ts
+            else:
+                lead.pop("report_requested", None)
         # A follow-up went out: kept on the lead, so the cadence knows it.
         if isinstance(body.get("bump_sent"), str) and body["bump_sent"].strip():
             lead.setdefault("bumps", []).append({"ts": ts, "text": body["bump_sent"][:DM_TEXT_MAX]})
@@ -1482,6 +1597,21 @@ def find_status():
 
 def start_write_job(body):
     ids = set(body.get("ids") or []) if isinstance(body.get("ids"), list) else None
+    flagged = []
+    if body.get("research") and ids:
+        # A buyer waiting on a report with nothing written yet: he asked for the
+        # research (one real ChatGPT answer) and the no-PDF messages now.
+        with LOCK:
+            leads = load_dm_leads()
+            n = 0
+            for l in leads:
+                if (l.get("id") in ids and l.get("status") == "ready" and lead_kind(l) == "message"
+                        and l.get("needs_report") and not (l.get("variants") or l.get("ask_variants"))):
+                    l["needs_message"] = True
+                    flagged.append(l["id"])
+                    n += 1
+            if n:
+                save_dm_leads(leads)
     live = {j["id"] for j in load_jobs() if j["kind"] == "dmwrite"
             and j["status"] in ("created", "fired", "working") and j.get("expires", 0) > time.time()}
     with LOCK:
@@ -1511,6 +1641,13 @@ def start_write_job(body):
                 save_dm_leads(leads)
     jobs = [public_job(get_job(j["id"])) for j, _ in fired]
     if all(j["status"] == "failed" for j in jobs):
+        if flagged:  # nothing started: they go back to waiting on the report
+            with LOCK:
+                leads = load_dm_leads()
+                for l in leads:
+                    if l.get("id") in flagged:
+                        l.pop("needs_message", None)
+                save_dm_leads(leads)
         return 502, {"error": jobs[0].get("error") or "Claude could not be started", "jobs": jobs}
     return 200, {"ok": True, "job": jobs[0], "jobs": jobs, "leads": len(todo)}
 
@@ -1665,6 +1802,9 @@ def dm_payload_for_write(job):
     examples = sorted(sends, key=lambda s: not s.get("replied"))[:12]
     return {"job_id": job["id"], "kind": "dmwrite", "note": job["payload"].get("note"),
             "mode": "followup" if job["payload"].get("followup") else "first",
+            # Templates he edited in the app. Word for word, they beat the
+            # fixed wording quoted in the campaign rules.
+            "templates": {c: t for c, t in load_dm_templates().items() if c in used},
             "leads": leads,
             "campaigns": {c: camps[c] for c in used if c in camps},
             "sent_examples": [{"channel": s.get("channel"), "campaign": s.get("campaign"),
@@ -1812,7 +1952,8 @@ LEAD_TS_FIELDS = ("updated_ts", "added_ts", "sent_ts", "requested_ts", "accepted
 SYNC_CHUNK = 12              # leads per call; small so a weak phone link gets them through
 SYNC_TOUCHED_PAGE = 500
 SYNC_ID_RE = re.compile(r"^[A-Za-z0-9_.:\-]{1,80}$")
-SYNC_DOCS = {"campaigns": (DM_CAMPAIGNS_FILE, "campaigns"), "libraries": (DM_LIBS_FILE, "libraries")}
+SYNC_DOCS = {"campaigns": (DM_CAMPAIGNS_FILE, "campaigns"), "libraries": (DM_LIBS_FILE, "libraries"),
+             "templates": (DM_TEMPLATES_FILE, "templates")}
 PEER_WAKE = threading.Event()
 PEER_STATUS = {"on": bool(PEER_URL), "last_ok": None, "last_try": None, "error": None,
                "pulled": 0, "pushed": 0, "behind": 0}
@@ -4137,6 +4278,8 @@ class AppHandler(BaseHandler):
                 return self._json(*sync_get(body))
             if path == "/api/sync/put":
                 return self._json(*sync_put(body))
+            if path == "/api/dm/templates":
+                return self._json(*dm_templates_save(body))
             if path == "/api/dm/connect-pause":
                 return self._json(*dm_connect_pause(body))
             if path == "/api/dm/cooldown/clear":
