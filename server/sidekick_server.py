@@ -2855,10 +2855,17 @@ def notify_job_end(job):
             n = sum(1 for i in load_queue() if i.get("status") == "drafted")
             push_notify("Replies ready", "%d to post in Ready." % n, "draft")
         elif kind == "dmwrite":
+            # Count what was really written, not who was in the job.
             fu = job["payload"].get("followup")
-            push_notify("Follow-ups written" if fu else "Messages written",
-                        "%d %s." % (len(job["payload"].get("lead_ids") or []),
-                                    "follow-ups to check" if fu else "people in To send"), "dmwrite")
+            ids = set(job["payload"].get("lead_ids") or [])
+            mine = [l for l in load_dm_leads() if l.get("id") in ids]
+            if fu:
+                n = sum(1 for l in mine if l.get("followup_variants"))
+                text = "%d to check in Sent." % n if n else "Nothing new to say for %d. See Sent." % len(mine)
+            else:
+                n = sum(1 for l in mine if l.get("status") == "ready" and l.get("variants") and not l.get("needs_message"))
+                text = "%d ready in To send." % n
+            push_notify("Follow-ups written" if fu else "Messages written", text, "dmwrite")
         elif kind == "leadfind":
             run = next((r for r in load_find_runs() if r.get("job_id") == job["id"]), {})
             push_notify("Find more finished", "Added %d people." % len(run.get("added") or []), "find")
