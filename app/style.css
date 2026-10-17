@@ -576,3 +576,20 @@ html, body { overscroll-behavior-y: contain; }
   color: var(--text); font-size: 20px; line-height: 1; display: grid; place-items: center; padding: 0 0 2px; }
 .step:disabled { opacity: .35; }
 .step:active { transform: scale(.94); }
+
+/* next step for a buyer waiting on a report */
+.next-steps { margin: 4px 0 12px; display: grid; gap: 8px; }
+.ns-head { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 6px 2px 0; }
+.ns-tile { display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left; padding: 12px 12px 12px 14px;
+  border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface-2); color: var(--text); font: inherit; }
+button.ns-tile:active { transform: scale(.99); background: var(--accent-soft); }
+button.ns-tile:disabled { opacity: .6; }
+.ns-tile.busy { border-color: var(--accent); background: var(--accent-soft); }
+.ns-tile.pending { border-style: dashed; }
+.ns-ico { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; font-size: 17px;
+  background: var(--surface); border: 1px solid var(--line); }
+.ns-tile.busy .ns-ico { border-color: transparent; background: transparent; }
+.ns-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ns-body b { font-size: 15px; font-weight: 700; }
+.ns-line { font-size: 13px; line-height: 1.4; color: var(--muted); }
+.ns-go { flex: none; align-self: center; font-size: 22px; color: var(--muted); }

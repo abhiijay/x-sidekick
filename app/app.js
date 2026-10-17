@@ -2725,7 +2725,7 @@ function pdfWaitingCard(list, i, nodes) {
   card.append(focusHeader(i, list.length, l, 'message', list),
     el('div', { class: 'focus-name', text: l.name || 'LinkedIn lead' }),
     l.product ? el('div', { class: 'focus-product', text: l.product }) : null,
-    pdfBadge(l), pdfActions(l), dmFlags(l, ''),
+    pdfBadge(l), nextSteps(l), dmFlags(l, ''),
     el('p', { class: 'hint', text: 'The four versions are written once the AI report is made for ' + (l.product || 'them') + '.' }));
   if (l.ask_variants && l.ask_variants.length) {
     card.append(el('button', { class: 'btn block', text: 'Ask first instead (' + l.ask_variants.length + ' short versions)',
@@ -2758,8 +2758,8 @@ function messageFocus(list, nodes) {
   if (opened) card.append(el('div', { class: 'focus-hint', text: 'Sent it? Tap Sent. Changed it in LinkedIn? Paste what you sent over the text first.' }));
   const badge = pdfBadge(l);
   if (badge) card.append(badge);
-  const pa = pdfActions(l);
-  if (pa) card.append(pa);
+  const ns = nextSteps(l);
+  if (ns) card.append(ns);
   card.append(dmFlags(l, ''));
   const chips = variantChips(l);
   if (chips) card.append(chips);
@@ -2865,8 +2865,10 @@ function renderLinkedIn(root) {
   const saved = state.outreach.filter((o) => o.platform === 'linkedin' && o.status === 'queued');
   const sleeping = mine.filter((l) => l.status === 'ready' && snoozed(l) && inCamp(l));
   const ready = mine.filter((l) => l.status === 'ready' && !snoozed(l) && inCamp(l)).sort(byTier);
-  const needs = ready.filter((l) => l.needs_message);
-  const allWritable = ready.filter((l) => !l.needs_message);
+  // A buyer being researched stays on their card (it shows the progress),
+  // not in the "needs a message" box with the new connections.
+  const needs = ready.filter((l) => l.needs_message && !l.needs_report);
+  const allWritable = ready.filter((l) => !l.needs_message || l.needs_report);
   const nIcp = allWritable.filter(isIcp).length;
   if (!['icp', 'other'].includes(li.aud)) li.aud = 'icp';
   // Buyers with something to send come before the ones still waiting on a PDF.
@@ -2990,16 +2992,40 @@ async function requestPdf(list, on = true) {
   renderDm('linkedin');
   toast(on ? (ok === 1 ? 'PDF requested for ' + dmWho(todo[0]) : ok + ' PDFs requested') + '. Claude makes it on the Mac.' : 'Request cancelled');
 }
-function pdfActions(l) {
+/* The next step for a buyer waiting on a report, as tappable tiles: what
+ * each one does, in plain words, and while Claude works, how long it has
+ * been going. */
+function jobFor(l) { return l.writing_job ? state.jobs.find((j) => j.id === l.writing_job) || null : null; }
+function stepTile({ icon, title, lines, onclick, busy, pending }) {
+  return el(onclick && !busy ? 'button' : 'div', { class: 'ns-tile' + (busy ? ' busy' : '') + (pending ? ' pending' : ''), onclick: onclick || null },
+    el('span', { class: 'ns-ico' }, busy ? el('span', { class: 'spin' }) : icon),
+    el('span', { class: 'ns-body' }, el('b', { text: title }), ...lines.map((t) => el('span', { class: 'ns-line', text: t }))),
+    onclick && !busy ? el('span', { class: 'ns-go', text: '›' }) : null);
+}
+function nextSteps(l) {
   if (!isIcp(l) || !pdfPending(l)) return null;
-  const row = el('div', { class: 'pdf-actions' });
-  if (l.writing_job) row.append(el('span', { class: 'muted small', text: 'Claude is researching and writing…' }));
-  else if (canResearch(l)) row.append(el('button', { class: 'link', text: '🔎 Research + write message', onclick: () => researchLeads([l]) }));
-  row.append(l.report_requested
-    ? el('button', { class: 'link muted-link', title: 'Tap to cancel the request', text: '📄 PDF requested · ' + agoText(l.report_requested),
-      onclick: () => sheet('PDF requested ' + agoText(l.report_requested), [{ label: 'Cancel the request', danger: true, run: () => requestPdf([l], false) }]) })
-    : el('button', { class: 'link', text: '📄 Make the PDF', onclick: () => requestPdf([l]) }));
-  return row;
+  const p = l.product || 'their product';
+  const first = (l.name || '').split(' ')[0] || 'them';
+  const tiles = [];
+  const job = jobFor(l);
+  if (l.writing_job && (!job || ACTIVE.includes(job.status))) {
+    tiles.push(stepTile({ busy: true, title: 'Researching ' + p,
+      lines: ['Claude is asking ChatGPT a question a buyer of ' + p + ' would type, then writing the messages from the answer.',
+        (job ? 'Started ' + agoText(job.ts) + ' · ' : '') + 'usually 3 to 5 minutes. You get a notification when it is done.'] }));
+  } else if (canResearch(l)) {
+    tiles.push(stepTile({ icon: '🔎', title: 'Research and write the message',
+      lines: ['Asks ChatGPT one question a buyer of ' + p + ' would type, then writes the no-PDF messages from what it says.',
+        'Takes a few minutes. Nothing is sent.'],
+      onclick: (e) => { const t = e.currentTarget; t.disabled = true; t.querySelector('b').textContent = 'Starting…'; researchLeads([l]); } }));
+  }
+  tiles.push(l.report_requested
+    ? stepTile({ pending: true, icon: '📄', title: 'Report PDF requested ' + agoText(l.report_requested),
+      lines: ['Claude builds it on the Mac: 10 buyer questions on ChatGPT and Perplexity, who gets named, and what rivals publish.', 'Tap to cancel the request.'],
+      onclick: () => sheet('Cancel the PDF request for ' + p + '?', [{ label: 'Cancel the request', danger: true, run: () => requestPdf([l], false) }]) })
+    : stepTile({ icon: '📄', title: 'Make the report PDF',
+      lines: ['10 buyer questions on ChatGPT and Perplexity, who gets named, and what rivals publish. Built on the Mac.', 'Tap to send the request.'],
+      onclick: () => requestPdf([l]) }));
+  return el('div', { class: 'next-steps' }, el('div', { class: 'ns-head', text: 'Next step for ' + first }), ...tiles);
 }
 
 /* ================= snooze, ICP moves, follow-ups, list select ================= */
