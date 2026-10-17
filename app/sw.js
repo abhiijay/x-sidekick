@@ -3,7 +3,9 @@
  * because every path is relative to this worker's scope.
  * API calls go to the sidekick server (another origin on GitHub Pages) and
  * are never cached. */
-const CACHE = 'sidekick-v25';
+const CACHE = 'sidekick-v26';
+// The app writes the server address here, so a knock knows where to ask.
+const META = 'sk-meta';
 const SHELL = ['./', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png'];
 
@@ -13,7 +15,7 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
-    .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+    .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== META).map((k) => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
@@ -35,5 +37,27 @@ self.addEventListener('fetch', (e) => {
     });
     if (hit) { if (net) e.waitUntil(net.catch(() => {})); return hit; }
     return net.catch(() => c.match('index.html'));
+  }));
+});
+
+/* Notifications. The server sends an empty push (a knock); this asks the
+ * server what happened (/push/last: counts only, no names) and shows it. */
+self.addEventListener('push', (e) => {
+  e.waitUntil((async () => {
+    let base = self.location.origin;
+    try { const m = await (await caches.open(META)).match('server'); if (m) base = (await m.text()) || base; } catch { /* default */ }
+    let n = { title: 'Sidekick', body: 'Something finished. Open the app.', tag: 'sidekick' };
+    try {
+      const r = await fetch(base.replace(/\/$/, '') + '/push/last', { cache: 'no-store', headers: { 'ngrok-skip-browser-warning': 'true' } });
+      if (r.ok) { const j = await r.json(); if (j && j.title) n = j; }
+    } catch { /* show the plain one */ }
+    await self.registration.showNotification(n.title, { body: n.body, tag: n.tag || 'sidekick', icon: 'icons/icon-192.png', badge: 'icons/icon-192.png' });
+  })());
+});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cs) => {
+    const c = cs.find((x) => x.url.startsWith(self.registration.scope));
+    return c ? c.focus() : self.clients.openWindow(self.registration.scope);
   }));
 });

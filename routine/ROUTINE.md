@@ -510,3 +510,10 @@ POST {base_url}/agent/job/{job_id}/dmwrite
    only quote a question and names that are in `research`, word for word. If
    `ask.on` is false or the call fails, claim no result at all.
 5. `POST {base_url}/agent/job/{job_id}/done` with `{"report": "wrote N, skipped M (why)"}`.
+
+### Follow-ups (payload `mode: "followup"`)
+
+The leads already got message one (`sent_text`, `sent_ts`, `bumps`). Write one
+or two follow-up versions per person under `followup_variants` (same endpoint),
+or `"no_followup": "<why>"`. At most two follow-ups per person. The writing
+rules for follow-ups are in the private copy of this file.

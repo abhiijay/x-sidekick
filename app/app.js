@@ -404,8 +404,19 @@ function contextBlock(it) {
     el('b', { text: c.mine ? 'You said' : '@' + handleOf(c.author) + ' said' }),
     el('div', { text: c.text }))];
 }
+/* When the post went up: X ids carry their own timestamp, so this is the
+ * post's age, not when it reached the queue. */
+function postTime(it) {
+  try { if (/^\d{15,}$/.test(String(it.tweet_id || ''))) return Number(BigInt(it.tweet_id) >> 22n) + 1288834974657; } catch { /* old browser */ }
+  return tsMs(it.ts);
+}
+function postAge(it) { return ago(new Date(postTime(it)).toISOString()); }
+const OLD_HOURS = 12;
+function isOld(it) { return Date.now() - postTime(it) > OLD_HOURS * 3600e3; }
 function mentionTag(it) {
   const tags = [];
+  // Past about 12 hours a reply is rarely seen: flag it so it goes first or gets skipped.
+  if (it.status === 'drafted' && it.source !== 'mention' && isOld(it)) tags.push(el('span', { class: 'tag old', title: 'Replies this late are rarely seen', text: 'Old · ' + postAge(it) }));
   if (it.source === 'mention') tags.push(el('span', { class: 'tag', text: 'Replied to you' }));
   if (it.post_type) tags.push(el('span', { class: 'tag', title: 'The kind of post Claude took this to be', text: it.post_type.replace(/-/g, ' ') }));
   return tags.length ? [el('div', { class: 'tag-row' }, ...tags)] : [];
@@ -473,7 +484,7 @@ function retryDraft(it) {
  * the card's foot. */
 function draftCard(it, opts = {}) {
   const card = el('div', { class: 'card' + (opts.focus ? ' focus-card' : '') },
-    whoRow(it.author, ago(it.ts) + (it.author_followers ? ' · ' + num(it.author_followers) + ' followers' : ''), () => itemMenu(it)),
+    whoRow(it.author, 'posted ' + postAge(it) + ' ago' + (it.author_followers ? ' · ' + num(it.author_followers) + ' followers' : ''), () => itemMenu(it)),
     ...mentionTag(it), ...contextBlock(it), postBlock(postText(it), 'post open'), ...postExtras(it));
   // The take the drafts were written from. If he has changed it since, Retry uses the new one.
   const usedTake = it.take_used || it.take;
@@ -580,6 +591,8 @@ function draftCard(it, opts = {}) {
       ]);
   };
   card.append(sentWrap);
+  card.onPosted = posted;
+  card.onSkip = () => setStatus(it, 'skipped');
   if (opts.focus) {
     card.actions = [
       el('button', { class: 'btn ok-solid grow', text: '✓ Posted', onclick: posted }),
@@ -599,6 +612,39 @@ function draftCard(it, opts = {}) {
       done();
     } })));
   return card;
+}
+
+/* Swipe a focus card: right for Posted, left for Skip. Only a clear sideways
+ * drag counts, and never one that starts in a text box, so scrolling and
+ * editing work as before. */
+function attachSwipe(card, onRight, onLeft) {
+  let x0 = 0, y0 = 0, dx = 0, mode = '';
+  card.addEventListener('touchstart', (e) => {
+    mode = /^(TEXTAREA|INPUT|SELECT)$/.test(e.target.tagName) ? 'off' : '';
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; dx = 0;
+  }, { passive: true });
+  card.addEventListener('touchmove', (e) => {
+    if (mode === 'off' || mode === 'v') return;
+    const mx = e.touches[0].clientX - x0, my = e.touches[0].clientY - y0;
+    if (!mode) {
+      if (Math.abs(my) > 10 && Math.abs(my) > Math.abs(mx)) { mode = 'v'; return; }
+      if (Math.abs(mx) > 14 && Math.abs(mx) > Math.abs(my) * 1.6) mode = 'h'; else return;
+    }
+    e.preventDefault();
+    dx = mx;
+    card.style.transition = 'none';
+    card.style.transform = 'translateX(' + dx + 'px) rotate(' + (dx / 40) + 'deg)';
+    card.dataset.swipe = dx > 90 ? 'right' : dx < -90 ? 'left' : '';
+  }, { passive: false });
+  card.addEventListener('touchend', () => {
+    if (mode !== 'h') return;
+    const go = dx > 90 ? onRight : dx < -90 ? onLeft : null;
+    card.style.transition = 'transform .2s ease';
+    card.style.transform = go ? 'translateX(' + (dx > 0 ? 120 : -120) + '%)' : '';
+    card.dataset.swipe = '';
+    if (go) setTimeout(() => { card.style.transform = ''; go(); }, 180);
+    mode = '';
+  });
 }
 
 /* Batch fix: when a whole batch went wrong (wrong prompt, AI language, false
@@ -639,16 +685,28 @@ function fixAllMessages(n) {
 }
 
 /* -- Ready: one post at a time, like the LinkedIn lists -- */
-const rp = { view: LS.get('rp_view', 'focus'), focus: LS.get('rp_focus', '') || null, idx: 0 };
-function renderReady(ready, emptyText) {
+const rp = { view: LS.get('rp_view', 'focus'), focus: LS.get('rp_focus', '') || null, idx: 0, type: LS.get('rp_type', '') };
+function typeName(t) { return t === 'other' ? 'No type' : t.replace(/-/g, ' '); }
+function renderReady(allReady, emptyText) {
   const box = $('readyList');
-  if (!ready.length) { box.replaceChildren(el('div', { class: 'empty', text: emptyText })); setDmActions(null); return; }
+  if (!allReady.length) { box.replaceChildren(el('div', { class: 'empty', text: emptyText })); setDmActions(null); return; }
+  // Post-type filter, for when Ready is long.
+  const types = {};
+  allReady.forEach((i) => { const t = i.post_type || 'other'; types[t] = (types[t] || 0) + 1; });
+  if (rp.type && !types[rp.type]) { rp.type = ''; LS.set('rp_type', ''); }
+  const ready = rp.type ? allReady.filter((i) => (i.post_type || 'other') === rp.type) : allReady;
+  const setType = (t) => { rp.type = t; LS.set('rp_type', t); rp.idx = 0; rp.focus = null; renderReplies(); window.scrollTo(0, 0); };
+  const typeChip = Object.keys(types).length > 1 ? el('button', { class: 'pill-chip' + (rp.type ? ' accent' : ''),
+    text: (rp.type ? typeName(rp.type) : 'All types') + ' ▾', onclick: () => sheet('Show', [
+      { label: 'All types (' + allReady.length + ')', run: () => setType('') },
+      ...Object.entries(types).sort((a, b) => b[1] - a[1]).map(([t, n]) => ({ label: typeName(t) + ' (' + n + ')', run: () => setType(t) })),
+    ]) }) : null;
   const toggle = el('div', { class: 'view-row' }, el('div', { class: 'mini-seg' },
     ...[['focus', 'One by one'], ['list', 'List (' + ready.length + ')']].map(([v, label]) =>
       el('button', { class: rp.view === v ? 'on' : '', text: label, onclick: () => {
         rp.view = v; LS.set('rp_view', v); renderReplies(); window.scrollTo(0, 0); } }))),
-    el('span', { class: 'spacer' }),
-    el('button', { class: 'pill-chip', text: '↻ Redo all', title: 'The whole batch is wrong: redraft all with a note', onclick: () => redoAllReplies(ready) }));
+    el('span', { class: 'spacer' }), typeChip,
+    el('button', { class: 'pill-chip', text: '↻ Redo all', title: 'The whole batch is wrong: redraft all with a note', onclick: () => redoAllReplies(allReady) }));
   if (rp.view === 'list') { box.replaceChildren(toggle, ...ready.map((it) => draftCard(it))); setDmActions(null); return; }
   let i = ready.findIndex((it) => it.id === rp.focus);
   if (i < 0) i = Math.min(rp.idx, ready.length - 1);
@@ -657,9 +715,11 @@ function renderReady(ready, emptyText) {
   const go = (k) => { rp.focus = ready[k].id; renderReplies(); window.scrollTo(0, 0); };
   const card = draftCard(it, { focus: true });
   card.prepend(el('div', { class: 'focus-top' }, el('span', { class: 'focus-count', text: (i + 1) + ' of ' + ready.length })));
+  attachSwipe(card, () => card.onPosted({ target: el('button') }), card.onSkip);
   card.append(el('div', { class: 'focus-nav' },
     el('button', { class: 'link', text: '‹ Previous', disabled: i === 0, onclick: () => go(i - 1) }),
-    el('button', { class: 'link', text: 'Later ›', title: 'Leave this one for later and show the next', onclick: () => go((i + 1) % ready.length) })));
+    el('button', { class: 'link', text: 'Later ›', title: 'Leave this one for later and show the next', onclick: () => go((i + 1) % ready.length) })),
+    el('div', { class: 'swipe-tip', text: 'Swipe right: Posted · Swipe left: Skip' }));
   const next = ready.slice(i + 1, i + 4);
   const up = next.length ? el('div', { class: 'up-next' }, el('div', { class: 'tier-head', text: 'Up next' }),
     ...next.map((n) => el('button', { class: 'next-row', onclick: () => go(ready.indexOf(n)) },
@@ -740,7 +800,8 @@ function doneRow(it) {
 
 function renderReplies() {
   state.repliesStale = false;
-  const ready = state.items.filter((i) => i.status === 'drafted');
+  // Freshest post first: a reply is worth most in the first hours.
+  const ready = state.items.filter((i) => i.status === 'drafted').sort((a, b) => postTime(b) - postTime(a));
   prunePicks(new Set(ready.map((i) => i.id)));
   const waiting = state.items.filter((i) => i.status === 'queued');
   const done = state.items.filter((i) => i.status === 'posted' || i.status === 'skipped').slice(0, 40);
@@ -1156,6 +1217,7 @@ function takeDm(d) {
   dm.libs = d.libraries || {};
   dm.stats = d.stats || {};
   dm.campaigns = d.campaigns || {};
+  dm.versions = d.versions || {};
   buildDmDefaults();
 }
 
@@ -1463,7 +1525,7 @@ async function dmShuffle(l) {
   const prev = { pick: l.pick || null, variant_index: l.variant_index || 0, draft_text: typeof l.draft_text === 'string' ? l.draft_text : null };
   const lib = libOf(l);
   if (l.variants && l.variants.length > 1) {
-    l.variant_index = ((l.variant_index || 0) + 1) % l.variants.length;
+    l.variant_index = pickVariant(l);
   } else if (lib) {
     const cur = messageOf(l);
     const taken = new Set(dm.leads.filter((x) => x.status === 'ready' && x.id !== l.id).map(messageOf));
@@ -1542,6 +1604,14 @@ function dmMenu(l, ta) {
   if (l.channel === 'linkedin') acts.push({ label: 'Tell Claude what to change', run: () => tellClaude(l, ta) });
   if (l.channel === 'linkedin' && l.claude_url) acts.push({ label: 'Open the Claude chat that wrote it ↗', run: () => openChat(l, ta ? ta.value : (l.sent_text || messageOf(l))) });
   if (l.channel === 'x' && l.recipient_id) acts.push({ label: 'Open DM screen', run: () => window.open(openUrl(l), '_blank', 'noopener') });
+  if (['ready', 'sent'].includes(l.status)) {
+    acts.push(snoozed(l) ? { label: 'Wake up (snoozed until ' + l.snooze_until + ')', run: () => snoozeLeads([l], '') }
+      : { label: '💤 Snooze…', run: () => snoozeSheet([l]) });
+  }
+  if (l.channel === 'linkedin' && kindOf(l) === 'message' && ['ready', 'sent'].includes(l.status)) {
+    acts.push(isIcp(l) ? { label: 'Move to Non-ICP', run: () => setIcp([l], 'light') }
+      : { label: 'Move to ICP (a real buyer)', run: () => setIcp([l], 'founder') });
+  }
   if (l.status === 'ready') {
     if (typeof l.draft_text === 'string') acts.push({ label: 'Reset my edits', run: async () => { delete l.draft_text; renderDm(l.channel); try { await dmSave(l, { draft_text: null }); } catch { /* toasted */ } } });
     if (l.needs_message) acts.push({ label: 'Skip this person', run: () => dmStatus(l, 'skipped', { reason: 'skipped on phone' }, 'Skipped ' + dmWho(l), 'ready') });
@@ -1902,6 +1972,8 @@ const li = {
   // Stored so a reload (the phone killing the app behind LinkedIn) lands on the same person.
   focus: { connect: LS.get('li_focus_connect', '') || null, message: LS.get('li_focus_message', '') || null }, idx: { connect: 0, message: 0 },
   q: '', showNeeds: false, aud: LS.get('li_aud', 'icp'),
+  filt: { connect: LS.get('li_filt_connect', 'all'), message: LS.get('li_filt_message', 'all') },
+  sel: { on: false, ids: new Set() },
 };
 const TIER_GROUPS = [['Contact this week', 0], ['Next batch', 1], ['Later', 2], ['No tier', 3]];
 function tierRank(t) { return TIER_RANK[t] ?? 3; }
@@ -2122,9 +2194,7 @@ async function shuffleAll(list, btn) {
   const taken = new Set(dm.leads.filter((x) => x.status === 'ready' && !mine.includes(x)).map(messageOf));
   for (const l of mine) {
     if (l.variants && l.variants.length > 1) {
-      const n = l.variants.length;
-      const cur = (l.variant_index || 0) % n;
-      l.variant_index = (cur + 1 + Math.floor(Math.random() * (n - 1))) % n;
+      l.variant_index = pickVariant(l);
     } else {
       const lib = libOf(l);
       const cur = messageOf(l);
@@ -2307,9 +2377,10 @@ function groupedByTier(list, rowFn) {
 
 function connectList(list, nodes) {
   setDmActions(null);
+  if (listTools('connect', list, nodes)) return;
   // In the list, the row's button follows the same two steps as the focus
   // view: Open, then (once opened) Sent.
-  nodes.push(...searchable('Search a name or product', () => groupedByTier(list.filter(matches), (l) =>
+  nodes.push(...searchable('Search a name or product', () => groupedByTier(list.filter(matches).filter(passes('connect')), (l) =>
     compactRow(l, () => focusOn('connect', l.id), el('span', { class: 'row-btns' },
       el('button', { class: 'btn sm', text: '↗', title: 'Open LinkedIn', onclick: () => connectOpen(l, null) }),
       el('button', { class: 'btn sm ' + (dm.opened.has(l.id) ? 'ok-solid' : 'ok'), text: '✓ Sent', onclick: () => dmStatus(l, 'requested', {}, 'Request sent to ' + (l.name || ''), 'ready') }))))));
@@ -2375,13 +2446,15 @@ function variantChips(l) {
     renderDm('linkedin');
     try { await dmSave(l, { variant_index: k, draft_text: null }); } catch { /* toasted */ }
   };
-  return el('div', { class: 'var-chips' }, ...l.variants.map((v, k) => el('button', {
+  const rates = l.variants.map((v) => { const st = verStat(l, v.label || 'Message'); return st && st.sent ? (v.label || 'Message') + ' ' + st.replied + '/' + st.sent : null; }).filter(Boolean);
+  return el('div', {}, el('div', { class: 'var-chips' }, ...l.variants.map((v, k) => el('button', {
     class: 'chip' + (k === cur ? ' on' : ''), text: v.label || 'Version ' + (k + 1),
     onclick: () => {
       if (k === cur) return;
       if (typeof l.draft_text === 'string') sheet('Switch and lose your edits to this one?', [{ label: 'Switch', run: () => pick(k) }]);
       else pick(k);
-    } })));
+    } }))),
+    rates.length ? el('div', { class: 'ver-rates', title: 'Replies out of sends, every send on record', text: 'Replied: ' + rates.join(' · ') }) : null);
 }
 
 // Files a lead carries (the report PDF to send along). Tapping one saves it to
@@ -2522,7 +2595,8 @@ function messageFocus(list, nodes) {
 
 function messageList(list, nodes) {
   setDmActions(null);
-  nodes.push(...searchable('Search a name or product', () => groupedByTier(list.filter(matches), (l) =>
+  if (listTools('message', list, nodes)) return;
+  nodes.push(...searchable('Search a name or product', () => groupedByTier(list.filter(matches).filter(passes('message')), (l) =>
     compactRow(l, () => focusOn('message', l.id), el('button', { class: 'btn sm', text: 'Open', onclick: () => focusOn('message', l.id) })))));
 }
 
@@ -2569,19 +2643,20 @@ function renderLinkedIn(root) {
   const inCamp = (l) => !dm.camp[ch] || l.campaign === dm.camp[ch];
 
   if (mode === 'connect') {
-    const todo = mine.filter((l) => l.status === 'ready' && inCamp(l)).sort(byTier);
+    const todo = mine.filter((l) => l.status === 'ready' && !snoozed(l) && inCamp(l)).sort(byTier);
     const asked = mine.filter((l) => l.status === 'requested' && inCamp(l))
       .sort((a, b) => (b.requested_ts || '').localeCompare(a.requested_ts || ''));
     const cdone = mine.filter((l) => ['skipped', 'cant_dm'].includes(l.status) && inCamp(l));
     nodes.push(segBar(CONNECT_SEGS, dm.cseg, { connect: todo.length, requested: asked.length },
-      (k) => { dm.cseg = k; LS.set('dmcseg', k); li.q = ''; renderDm(ch); }));
+      (k) => { dm.cseg = k; LS.set('dmcseg', k); li.q = ''; li.sel.on = false; renderDm(ch); }));
     if (dm.cseg === 'requested') {
       requestedList(asked, nodes);
     } else if (dm.cseg === 'cdone') {
       setDmActions(null);
       nodes.push(...(cdone.length ? cdone.map(connectDoneRow) : [el('div', { class: 'empty', text: 'Skips and dead links land here.' })]));
     } else {
-      nodes.push(el('div', { class: 'view-row' }, viewToggle('connect', todo.length), el('span', { class: 'spacer' }), campFilterChip(camps)));
+      nodes.push(el('div', { class: 'view-row' }, viewToggle('connect', todo.length), el('span', { class: 'spacer' }),
+        snoozeChip(mine.filter((l) => l.status === 'ready' && snoozed(l) && inCamp(l))), campFilterChip(camps)));
       if (li.view.connect === 'list') connectList(todo, nodes); else connectFocus(todo, nodes);
     }
     root.replaceChildren(...nodes);
@@ -2589,7 +2664,8 @@ function renderLinkedIn(root) {
   }
 
   const saved = state.outreach.filter((o) => o.platform === 'linkedin' && o.status === 'queued');
-  const ready = mine.filter((l) => l.status === 'ready' && inCamp(l)).sort(byTier);
+  const sleeping = mine.filter((l) => l.status === 'ready' && snoozed(l) && inCamp(l));
+  const ready = mine.filter((l) => l.status === 'ready' && !snoozed(l) && inCamp(l)).sort(byTier);
   const needs = ready.filter((l) => l.needs_message);
   const allWritable = ready.filter((l) => !l.needs_message);
   const nIcp = allWritable.filter(isIcp).length;
@@ -2602,7 +2678,7 @@ function renderLinkedIn(root) {
     .sort((a, b) => ((b.status === 'replied') - (a.status === 'replied')) || (b.updated_ts || '').localeCompare(a.updated_ts || ''));
   const replied = done.filter((l) => l.status === 'replied').length;
   nodes.push(segBar(DM_SEGS, dm.seg[ch], { send: allWritable.length, sent: sent.length, done: replied, saved: saved.length },
-    (k) => { dm.seg[ch] = k; LS.set('dmseg_' + ch, k); li.q = ''; renderDm(ch); }));
+    (k) => { dm.seg[ch] = k; LS.set('dmseg_' + ch, k); li.q = ''; li.sel.on = false; renderDm(ch); }));
   const which = dm.seg[ch];
   if (which === 'send') {
     if (needs.length) nodes.push(needsBanner(needs));
@@ -2615,7 +2691,7 @@ function renderLinkedIn(root) {
         } })));
     // Row one picks what is shown, row two acts on the whole list.
     nodes.push(el('div', { class: 'view-row' }, viewToggle('message', writable.length), audToggle));
-    const acts = [shuffleChip(writable.filter(hasMessage)),
+    const acts = [shuffleChip(writable.filter(hasMessage)), snoozeChip(sleeping),
       writable.length ? el('button', { class: 'pill-chip', text: '✎ Fix all', title: 'The whole batch is wrong: rewrite all with a note', onclick: () => fixAllMessages(writable.filter((l) => l.variants && l.variants.length).length) }) : null,
       campFilterChip(camps)].filter(Boolean);
     if (acts.length) nodes.push(el('div', { class: 'view-row' }, ...acts));
@@ -2624,8 +2700,7 @@ function renderLinkedIn(root) {
   } else {
     setDmActions(null);
     if (which === 'sent') {
-      nodes.push(el('p', { class: 'hint', text: 'Waiting on a reply. Tap "They replied" when one comes in, and paste it so Claude can draft your answer.' }));
-      nodes.push(...(sent.length ? sent.map(dmSentCard) : [el('div', { class: 'empty', text: 'Nothing sent in the last 30 days.' })]));
+      sentView(ch, sent, nodes);
     } else if (which === 'done') {
       nodes.push(...(done.length ? done.map(dmDoneRow) : [el('div', { class: 'empty', text: 'Replies, skips and closed chats land here.' })]));
     } else {
@@ -2634,6 +2709,225 @@ function renderLinkedIn(root) {
     }
   }
   root.replaceChildren(...nodes);
+}
+
+
+/* ================= snooze, ICP moves, follow-ups, list select ================= */
+function todayStr() { return localStamp().slice(0, 10); }
+function dateIn(days) { return localStamp(new Date(Date.now() + days * 86400000)).slice(0, 10); }
+function snoozed(l) { return !!l.snooze_until && l.snooze_until > todayStr(); }
+
+async function snoozeLeads(list, until) {
+  let ok = 0;
+  try { for (const l of list) { await dmSave(l, { snooze_until: until || null }, true); ok++; } }
+  catch (e) { toast(e.message, true); }
+  li.sel.on = false; li.sel.ids.clear();
+  renderDm(list[0].channel);
+  toast(until ? (ok === 1 ? dmWho(list[0]) : ok + ' people') + ' snoozed until ' + until : 'Woken up: ' + ok);
+}
+function snoozeSheet(list) {
+  const who = list.length === 1 ? dmWho(list[0]) : list.length + ' people';
+  sheet('Snooze ' + who + ' until…', [['Tomorrow', 1], ['In 3 days', 3], ['In a week', 7], ['In 2 weeks', 14], ['In a month', 30]]
+    .map(([label, d]) => ({ label: label + ' · ' + dateIn(d), run: () => snoozeLeads(list, dateIn(d)) })));
+}
+function snoozeChip(list) {
+  if (!list.length) return null;
+  return el('button', { class: 'pill-chip', text: '💤 ' + list.length, title: 'Snoozed people', onclick: () => sheet('Snoozed', [
+    ...list.map((l) => ({ label: 'Wake ' + dmWho(l) + ' (until ' + l.snooze_until + ')', run: () => snoozeLeads([l], '') })),
+    ...(list.length > 1 ? [{ label: 'Wake all ' + list.length, run: () => snoozeLeads(list, '') }] : []),
+  ]) });
+}
+
+/* He decides who is a buyer. Moving someone to ICP puts their non-ICP note
+ * aside on the server and they wait as "PDF to be made" (a buyer gets the full
+ * set or nothing); moving them back brings the note back. */
+async function setIcp(list, icp) {
+  const prev = list.map((l) => ({ l, icp: l.icp || 'light' }));
+  let ok = 0;
+  try { for (const l of list) { await dmSave(l, { icp }, true); ok++; } } catch (e) { toast(e.message, true); }
+  li.sel.on = false; li.sel.ids.clear();
+  renderDm('linkedin');
+  const toBuyer = !['light', 'watch'].includes(icp);
+  toast((ok === 1 ? dmWho(list[0]) : ok + ' people') + ' moved to ' + (toBuyer ? 'ICP. Their note is kept aside until the report is made.' : 'Non-ICP.'), false,
+    { label: 'Undo', run: async () => {
+      try { for (const p of prev) await dmSave(p.l, { icp: p.icp }, true); renderDm('linkedin'); toast('Undone'); } catch (e) { toast(e.message, true); }
+    } });
+}
+
+/* Reply rate per version, from every send on record (the server counts). */
+function verStat(l, label) { return (dm.versions || {})[(l.channel || '') + '|' + (l.campaign || '') + '|' + label] || null; }
+function verWeight(l, label) { const st = verStat(l, label) || { sent: 0, replied: 0 }; return (st.replied + 1) / (st.sent + 2); }
+/* Another version, leaning toward the ones that get replies. A version with
+ * no sends yet starts at even odds, so new ones still get tried. */
+function pickVariant(l) {
+  const n = l.variants.length, cur = (l.variant_index || 0) % n;
+  const opts = l.variants.map((v, k) => k).filter((k) => k !== cur);
+  const w = opts.map((k) => verWeight(l, l.variants[k].label || 'Message'));
+  let r = Math.random() * w.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < opts.length; i++) { r -= w[i]; if (r <= 0) return opts[i]; }
+  return opts[opts.length - 1];
+}
+function versionsSheet(ch) {
+  const camp = dm.camp[ch];
+  const rows = Object.entries(dm.versions || {}).filter(([k]) => k.startsWith(ch + '|') && (!camp || k.split('|')[1] === camp))
+    .map(([k, v]) => ({ name: k.split('|')[2], camp: k.split('|')[1], sent: v.sent, replied: v.replied })).filter((r) => r.sent)
+    .sort((a, b) => b.replied / b.sent - a.replied / a.sent || b.sent - a.sent);
+  sheetCustom('Reply rate per version', [
+    el('div', { class: 'sheet-note', text: 'Replies out of sends, every send on record. Shuffle leans toward the versions near the top. A version needs about 10 sends before its rate means much.' }),
+    ...rows.map((r) => el('div', { class: 'ver-row' },
+      el('span', { class: 'grow', text: r.name }),
+      el('span', { class: 'muted small', text: (dm.campaigns[r.camp] && dm.campaigns[r.camp].label) || r.camp }),
+      el('b', { text: r.replied + '/' + r.sent + ' · ' + Math.round(100 * r.replied / r.sent) + '%' }))),
+  ]);
+}
+
+/* -- follow-ups: sent, no reply, due -- */
+const FU_DAYS = { linkedin: [3, 5], x: [2, 3] };   // conversion playbook, section 4
+function lastTouch(l) { const b = l.bumps || []; return b.length ? b[b.length - 1].ts : l.sent_ts; }
+function followupDue(l) {
+  const n = (l.bumps || []).length;
+  if (l.status !== 'sent' || !isIcp(l) || snoozed(l) || l.no_followup || n >= 2) return false;
+  const d = daysSince(lastTouch(l));
+  return d !== null && d >= (FU_DAYS[l.channel] || FU_DAYS.linkedin)[n];
+}
+const fuPick = {};
+function followupCard(l) {
+  const n = (l.bumps || []).length;
+  const card = el('div', { class: 'card dm-card' });
+  card.append(whoRow(l.channel === 'x' ? handleOf(l.handle) : (l.name || '?'),
+    'sent ' + agoText(lastTouch(l)) + (l.product ? ' · ' + l.product : '') + ' · follow-up ' + (n + 1) + ' of 2', () => dmMenu(l)));
+  if (l.channel === 'linkedin') card.querySelector('.who-name b').textContent = l.name || 'LinkedIn lead';
+  card.append(el('div', { class: 'sent-label', text: n ? 'Your last follow-up' : 'You sent' }),
+    postBlock(n ? l.bumps[n - 1].text : (l.sent_text || '(sent text not recorded)'), 'post short'));
+  const fv = l.followup_variants || [];
+  const replied = el('button', { class: 'btn', text: 'They replied', onclick: () => dmStatus(l, 'replied', {}, dmWho(l) + ' replied, moved to Done', 'sent') });
+  if (l.writing_job) {
+    card.append(el('div', { class: 'focus-hint', text: 'Claude is writing this follow-up…' }), el('div', { class: 'dm-row' }, replied));
+    return card;
+  }
+  if (!fv.length) {
+    card.append(el('p', { class: 'hint', text: 'No follow-up written yet.' }), el('div', { class: 'dm-row' }, replied,
+      el('button', { class: 'btn', text: 'Open', onclick: () => openLead(l, openUrl(l)) })));
+    return card;
+  }
+  const k = Math.min(fuPick[l.id] || 0, fv.length - 1);
+  if (fv.length > 1) card.append(el('div', { class: 'var-chips' }, ...fv.map((v, j) => el('button', { class: 'chip' + (j === k ? ' on' : ''),
+    text: v.label || 'Version ' + (j + 1), onclick: () => { fuPick[l.id] = j; renderDm(l.channel); } }))));
+  const ta = el('textarea', { class: 'dm-msg', rows: 5 });
+  ta.value = fv[k].text;
+  card.append(ta, el('div', { class: 'dm-row' },
+    el('button', { class: 'btn primary grow', text: 'Copy + open ↗', onclick: async () => {
+      const ok = await copy(ta.value);
+      toast(ok ? 'Copied. Paste it in ' + DM_NAME[l.channel] + '.' : 'Copy failed', !ok);
+      openLead(l, openUrl(l));
+    } }),
+    el('button', { class: 'btn ok', text: '✓ Sent', onclick: async () => {
+      try {
+        await dmSave(l, { bump_sent: ta.value.trim() });
+        renderDm(l.channel);
+        toast('Follow-up ' + (n + 1) + ' logged', false, { label: 'Undo', run: async () => {
+          try { await dmSave(l, { bump_undo: true }); renderDm(l.channel); } catch { /* toasted */ } } });
+      } catch { /* toasted */ }
+    } }), replied));
+  return card;
+}
+function sentView(ch, sent, nodes) {
+  const due = sent.filter(followupDue);
+  const key = 'sentview_' + ch;
+  const v = due.length ? LS.get(key, 'due') : 'all';
+  nodes.push(el('div', { class: 'view-row' }, el('div', { class: 'mini-seg' },
+    ...[['due', 'Follow up (' + due.length + ')'], ['all', 'All sent (' + sent.length + ')']].map(([k, label]) =>
+      el('button', { class: v === k ? 'on' : '', text: label, disabled: k === 'due' && !due.length,
+        onclick: () => { LS.set(key, k); renderDm(ch); } }))),
+    el('span', { class: 'spacer' }),
+    Object.keys(dm.versions || {}).some((x) => x.startsWith(ch + '|')) ? el('button', { class: 'pill-chip', text: '📊 Versions', onclick: () => versionsSheet(ch) }) : null));
+  if (v === 'all') {
+    nodes.push(el('p', { class: 'hint', text: 'Waiting on a reply. Tap "They replied" when one comes in, and paste it so Claude can draft your answer.' }));
+    nodes.push(...(sent.length ? sent.map(dmSentCard) : [el('div', { class: 'empty', text: 'Nothing sent in the last 30 days.' })]));
+    return;
+  }
+  const need = due.filter((l) => !(l.followup_variants && l.followup_variants.length) && !l.writing_job);
+  nodes.push(el('p', { class: 'hint', text: 'Sent ' + FU_DAYS[ch][0] + '+ days ago with no reply. Two follow-ups at most, each with something new in it. Non-ICP people get none.' }));
+  if (need.length) {
+    nodes.push(el('button', { class: 'btn primary block', text: '✍ Write ' + need.length + ' follow-up' + (need.length === 1 ? '' : 's') + ' with Claude', onclick: async (e) => {
+      const done = busy2(e.target);
+      try { const r = await api('/api/dm/followup', { ids: need.map((l) => l.id) }); toast('Claude is writing ' + r.leads + '. Takes a few minutes.'); await refresh(); }
+      catch (err) { toast(err.message, true); }
+      done();
+    } }));
+  }
+  nodes.push(...due.map(followupCard));
+}
+
+/* -- list view: filters, then select several and act on them together -- */
+const LIST_FILTERS = {
+  message: [['all', 'All'], ['msg', 'Has message'], ['nomsg', 'No message yet'], ['edited', 'Edited'], ['t0', 'This week'], ['t1', 'Next batch'], ['t2', 'Later']],
+  connect: [['all', 'All'], ['t0', 'This week'], ['t1', 'Next batch'], ['t2', 'Later']],
+};
+function passesKey(f) {
+  return (l) => f === 'all' ? true
+    : f === 'msg' ? !!(l.variants && l.variants.length) || !!l.library || typeof l.draft_text === 'string'
+    : f === 'nomsg' ? !(l.variants && l.variants.length) && !l.library && typeof l.draft_text !== 'string'
+    : f === 'edited' ? typeof l.draft_text === 'string'
+    : f === 't2' ? tierRank(l.tier) >= 2
+    : f[0] === 't' ? tierRank(l.tier) === Number(f.slice(1))
+    : true;
+}
+function passes(mode) { return passesKey(li.filt[mode] || 'all'); }
+/* Draws the filter chips. In select mode it also draws the whole list and
+ * returns true. */
+function listTools(mode, list, nodes) {
+  if (!LIST_FILTERS[mode].some(([k]) => k === li.filt[mode])) li.filt[mode] = 'all';
+  const row = el('div', { class: 'li-status' }, ...LIST_FILTERS[mode].map(([k, label]) => {
+    const n = list.filter(passesKey(k)).length;
+    return k !== 'all' && !n ? null : el('button', { class: 'pill-chip small' + (li.filt[mode] === k ? ' accent' : ''), text: label + ' ' + n,
+      onclick: () => { li.filt[mode] = k; LS.set('li_filt_' + mode, k); renderDm('linkedin'); } });
+  }), el('button', { class: 'pill-chip small' + (li.sel.on ? ' accent' : ''), text: li.sel.on ? 'Done selecting' : '☑ Select',
+    onclick: () => { li.sel.on = !li.sel.on; li.sel.ids.clear(); renderDm('linkedin'); } }));
+  nodes.push(row);
+  if (!li.sel.on) return false;
+  const shown = list.filter(matches).filter(passes(mode));
+  const live = new Set(shown.map((l) => l.id));
+  [...li.sel.ids].forEach((id) => { if (!live.has(id)) li.sel.ids.delete(id); });
+  const picked = shown.filter((l) => li.sel.ids.has(l.id));
+  const all = picked.length === shown.length && shown.length > 0;
+  const acts = [
+    el('button', { class: 'pill-chip', text: all ? 'Select none' : 'Select all ' + shown.length,
+      onclick: () => { li.sel.ids = new Set(all ? [] : shown.map((l) => l.id)); renderDm('linkedin'); } }),
+    el('span', { class: 'spacer' }),
+  ];
+  const n = picked.length;
+  if (n) {
+    acts.push(el('button', { class: 'pill-chip warn', text: 'Skip ' + n, onclick: () => sheet('Skip ' + n + '?', [{ label: 'Skip ' + n, danger: true, run: () => bulkSkip(picked) }]) }));
+    if (mode === 'message') {
+      if (picked.some((l) => (l.variants && l.variants.length > 1) || libOf(l))) acts.push(el('button', { class: 'pill-chip', text: '🎲 Shuffle', onclick: (e) => shuffleAll(picked, e.target) }));
+      acts.push(el('button', { class: 'pill-chip', text: li.aud === 'icp' ? '→ Non-ICP' : '→ ICP',
+        onclick: () => setIcp(picked, li.aud === 'icp' ? 'light' : 'founder') }));
+    }
+    acts.push(el('button', { class: 'pill-chip', text: '💤 Snooze', onclick: () => snoozeSheet(picked) }));
+  }
+  nodes.push(el('div', { class: 'view-row sel-bar' }, ...acts));
+  nodes.push(...(shown.length ? shown.map((l) => {
+    const on = li.sel.ids.has(l.id);
+    return el('div', { class: 'card pickable row-pick' + (on ? ' picked' : ''), role: 'checkbox', 'aria-checked': String(on),
+      onclick: () => { if (li.sel.ids.has(l.id)) li.sel.ids.delete(l.id); else li.sel.ids.add(l.id); renderDm('linkedin'); } },
+      el('div', { class: 'who' }, el('span', { class: 'pick-box', text: on ? '✓' : '' }),
+        el('div', { class: 'who-name' }, el('b', { text: l.name || '?' }),
+          el('span', { text: [l.product, l.tier, typeof l.draft_text === 'string' ? 'edited' : null].filter(Boolean).join(' · ') }))));
+  }) : [el('div', { class: 'empty', text: 'Nobody matches this filter.' })]));
+  return true;
+}
+async function bulkSkip(list) {
+  const prev = list.map((l) => ({ l, status: l.status }));
+  let ok = 0;
+  try { for (const l of list) { await dmSave(l, { status: 'skipped', reason: 'skipped on phone (bulk)' }, true); ok++; } }
+  catch (e) { toast(e.message, true); }
+  li.sel.on = false; li.sel.ids.clear();
+  buildDmDefaults(); renderDm('linkedin'); updateDmBadges();
+  toast('Skipped ' + ok, false, { label: 'Undo', run: async () => {
+    try { for (const p of prev) await dmSave(p.l, { status: p.status }, true); buildDmDefaults(); renderDm('linkedin'); updateDmBadges(); toast('Undone'); }
+    catch (e) { toast(e.message, true); }
+  } });
 }
 
 /* -- panel -- */
@@ -2703,7 +2997,7 @@ function renderDm(ch, keepLinesOpenFor) {
     return;
   }
 
-  const ready = mine.filter((l) => l.status === 'ready' && inCamp(l)).sort(byTier);
+  const ready = mine.filter((l) => l.status === 'ready' && !snoozed(l) && inCamp(l)).sort(byTier);
   const needs = ready.filter((l) => l.needs_message);
   const writable = ready.filter((l) => !l.needs_message);
   const sent = mine.filter((l) => l.status === 'sent' && inCamp(l)).sort((a, b) => (b.sent_ts || '').localeCompare(a.sent_ts || ''));
@@ -2720,7 +3014,8 @@ function renderDm(ch, keepLinesOpenFor) {
   if (which === 'send') {
     if (needs.length) nodes.push(needsCard(ch, needs));
     const shuf = shuffleChip(writable);
-    if (shuf) nodes.push(el('div', { class: 'view-row' }, el('span', { class: 'spacer' }), shuf));
+    const zz = snoozeChip(mine.filter((l) => l.status === 'ready' && snoozed(l) && inCamp(l)));
+    if (shuf || zz) nodes.push(el('div', { class: 'view-row' }, el('span', { class: 'spacer' }), zz, shuf));
     nodes.push(el('p', { class: 'hint', text: ch === 'x'
       ? 'Open the profile first: check the product and that their DMs are open. One DM, one gap, then the next. Stop the batch if X ever says Failed.'
       : 'Check the chat first. If an older message already went out, change the first line before you send.' }));
@@ -2731,8 +3026,7 @@ function renderDm(ch, keepLinesOpenFor) {
     }
     writable.forEach((l, i) => nodes.push(dmSendCard(l, i === 0, keepLinesOpenFor === l.id)));
   } else if (which === 'sent') {
-    nodes.push(el('p', { class: 'hint', text: 'Waiting on a reply. Tap "They replied" when one comes in, and paste it so Claude can draft your answer.' }));
-    nodes.push(...(sent.length ? sent.map(dmSentCard) : [el('div', { class: 'empty', text: 'Nothing sent in the last 30 days.' })]));
+    sentView(ch, sent, nodes);
   } else if (which === 'done') {
     nodes.push(...(done.length ? done.map(dmDoneRow) : [el('div', { class: 'empty', text: 'Replies, skips and closed DMs land here.' })]));
   } else {
@@ -2836,6 +3130,62 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && Da
 })();
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
+
+/* -- notifications -- */
+function b64uBytes(b64) {
+  const raw = atob(b64.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((b64.length + 3) % 4));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+async function pushReg() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) throw new Error('This browser cannot show notifications from the app. On Android use Chrome, installed to the home screen.');
+  return navigator.serviceWorker.ready;
+}
+async function pushShowState() {
+  const box = $('pushState');
+  try {
+    const reg = await pushReg();
+    const sub = await reg.pushManager.getSubscription();
+    box.textContent = sub && Notification.permission === 'granted'
+      ? 'On for this device. You get one when Claude finishes drafting, writing, follow-ups or Find more.'
+      : Notification.permission === 'denied' ? 'Blocked for this site. Allow notifications in the browser\'s site settings, then tap Turn on.'
+        : 'Off. Turn on to hear when Claude finishes drafting, writing messages or follow-ups, or Find more.';
+  } catch (e) { box.textContent = e.message; }
+}
+async function pushOn(btn) {
+  const done = busy(btn, '…');
+  try {
+    const reg = await pushReg();
+    if (await Notification.requestPermission() !== 'granted') throw new Error('Notifications are blocked. Allow them for this site in the browser settings.');
+    const { key } = await api('/api/push/key');
+    let sub = await reg.pushManager.getSubscription();
+    // A subscription made for another server's key cannot be reused.
+    if (sub && sub.options && sub.options.applicationServerKey) {
+      const have = btoa(String.fromCharCode(...new Uint8Array(sub.options.applicationServerKey))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      if (have !== key) { await sub.unsubscribe(); sub = null; }
+    }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uBytes(key) });
+    try { await (await caches.open('sk-meta')).put('server', new Response(serverBase())); } catch { /* same-origin default */ }
+    await api('/api/push/subscribe', { subscription: sub.toJSON(), device: /android/i.test(navigator.userAgent) ? 'phone' : 'computer' });
+    toast('Notifications on');
+  } catch (e) { toast(e.message, true); }
+  done();
+  pushShowState();
+}
+$('pushOn').addEventListener('click', (e) => pushOn(e.target));
+$('pushTest').addEventListener('click', async () => {
+  try { const r = await api('/api/push/test', {}); toast(r.devices ? 'Sent to ' + r.devices + (r.devices === 1 ? ' device' : ' devices') : 'No device is subscribed yet. Tap Turn on first.', !r.devices); }
+  catch (e) { toast(e.message, true); }
+});
+$('pushOff').addEventListener('click', async () => {
+  try {
+    const reg = await pushReg();
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) { await api('/api/push/subscribe', { subscription: sub.toJSON(), off: true }); await sub.unsubscribe(); }
+    toast('Notifications off');
+  } catch (e) { toast(e.message, true); }
+  pushShowState();
+});
+pushShowState();
 handleShareLaunch();
 bootFromCache();
 renderDmAll();

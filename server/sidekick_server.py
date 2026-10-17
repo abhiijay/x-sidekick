@@ -793,7 +793,26 @@ def dm_view():
     camps = {k: {"label": v.get("label") or k, "channels": v.get("channels") or list(DM_CHANNELS)}
              for k, v in load_dm_campaigns().items()}
     return {"leads": shown, "libraries": libs, "stats": dm_stats(leads, load_dm_state()),
-            "cooldown_min": DM_COOLDOWN_MIN, "campaigns": camps}
+            "cooldown_min": DM_COOLDOWN_MIN, "campaigns": camps, "versions": version_stats(leads)}
+
+
+def version_label(sent_lines):
+    """"Video pitch · 1/2" -> "Video pitch"; library lines -> the hook."""
+    return re.split(r"\s·\s", str(sent_lines or "").strip())[0].strip()
+
+
+def version_stats(leads):
+    """Reply rate per message version, over every send on record (the app only
+    gets the recent leads, so it cannot count this itself)."""
+    out = {}
+    for l in leads:
+        if l.get("status") not in ("sent", "replied") or not l.get("sent_lines"):
+            continue
+        key = "%s|%s|%s" % (l.get("channel") or "", l.get("campaign") or "", version_label(l["sent_lines"]))
+        row = out.setdefault(key, {"sent": 0, "replied": 0})
+        row["sent"] += 1
+        row["replied"] += l.get("status") == "replied"
+    return out
 
 
 def lead_chats():
@@ -1137,6 +1156,43 @@ def dm_update(body):
             lead["sent_verbatim"] = body["sent_verbatim"]
         if isinstance(body.get("sent_lines"), str):
             lead["sent_lines"] = body["sent_lines"][:120]
+        # Snooze: hidden from To send until that day ("" or null wakes them).
+        if "snooze_until" in body:
+            v = str(body.get("snooze_until") or "")
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+                lead["snooze_until"] = v
+            else:
+                lead.pop("snooze_until", None)
+        # He moved someone between ICP and Non-ICP. A buyer's card holds the
+        # full buyer set or nothing, so the non-ICP note is put aside (not lost)
+        # and they wait as "PDF to be made"; moving back restores the note.
+        if body.get("icp") in ("founder", "agent", "light", "watch") and body["icp"] != lead.get("icp"):
+            was_buyer = lead.get("icp") not in ("light", "watch")
+            to_buyer = body["icp"] not in ("light", "watch")
+            lead["previous_icp"] = lead.get("icp") or ""
+            lead["icp"] = body["icp"]
+            lead["icp_by_hand"] = now_str()
+            if lead.get("status") == "ready" and lead_kind(lead) == "message" and was_buyer != to_buyer:
+                if to_buyer:
+                    if lead.get("variants"):
+                        lead["light_variants"] = lead["variants"]
+                    lead["variants"] = []
+                    lead["needs_report"] = True
+                    lead.pop("needs_message", None)
+                else:
+                    for k in ("needs_report", "ask_on"):
+                        lead.pop(k, None)
+                    lead["variants"] = lead.pop("light_variants", None) or []
+                    if not lead["variants"]:
+                        lead["needs_message"] = True
+                lead["variant_index"] = 0
+                lead.pop("draft_text", None)
+        # A follow-up went out: kept on the lead, so the cadence knows it.
+        if isinstance(body.get("bump_sent"), str) and body["bump_sent"].strip():
+            lead.setdefault("bumps", []).append({"ts": ts, "text": body["bump_sent"][:DM_TEXT_MAX]})
+            lead.pop("followup_variants", None)
+        if body.get("bump_undo") and lead.get("bumps"):
+            lead["bumps"].pop()
 
         if body.get("kind") in ("connect", "message"):
             lead["kind"] = body["kind"]          # only used to undo an "accepted"
@@ -1451,6 +1507,48 @@ def start_write_job(body):
     return 200, {"ok": True, "job": jobs[0], "jobs": jobs, "leads": len(todo)}
 
 
+FOLLOWUP_MAX = 2   # two bumps, then stop (conversion playbook, section 4)
+
+
+def start_followup_job(body):
+    """Write follow-ups for people who got message one and never answered.
+    Same dmwrite job; the payload says it is a follow-up and carries what was
+    sent. Not-our-buyer ("light") people get no follow-up by the rules."""
+    ids = set(body.get("ids") or []) if isinstance(body.get("ids"), list) else set()
+    if not ids:
+        return 400, {"error": "ids required"}
+    live = {j["id"] for j in load_jobs() if j["kind"] == "dmwrite"
+            and j["status"] in ("created", "fired", "working") and j.get("expires", 0) > time.time()}
+    with LOCK:
+        leads = load_dm_leads()
+        todo = [l for l in leads if l.get("id") in ids and l.get("status") == "sent"
+                and l.get("icp") not in ("light", "watch") and len(l.get("bumps") or []) < FOLLOWUP_MAX
+                and l.get("writing_job") not in live]
+        if not todo:
+            return 400, {"error": "nobody here can get a follow-up (not-our-buyer people and anyone with two already are left out)"}
+        fired = []
+        for start in range(0, len(todo), WRITE_CHUNK):
+            chunk = todo[start:start + WRITE_CHUNK]
+            job, token = create_job("dmwrite", {"lead_ids": [l["id"] for l in chunk], "followup": True,
+                                                "note": str(body.get("note") or "")[:500]})
+            for l in chunk:
+                l["writing_job"] = job["id"]
+            fired.append((job, token))
+        save_dm_leads(leads)
+    for job, token in fired:
+        if not fire_routine(job, token):
+            with LOCK:
+                leads = load_dm_leads()
+                for l in leads:
+                    if l.get("writing_job") == job["id"]:
+                        l.pop("writing_job", None)
+                save_dm_leads(leads)
+    jobs = [public_job(get_job(j["id"])) for j, _ in fired]
+    if all(j["status"] == "failed" for j in jobs):
+        return 502, {"error": jobs[0].get("error") or "Claude could not be started", "jobs": jobs}
+    return 200, {"ok": True, "job": jobs[0], "jobs": jobs, "leads": len(todo)}
+
+
 class AskError(Exception):
     pass
 
@@ -1542,6 +1640,8 @@ def dm_payload_for_write(job):
     keep = ("id", "channel", "campaign", "name", "handle", "profile_url", "product", "tagline", "site",
             "headline", "meta", "flag", "note", "icp", "tier", "fields", "reply_text", "context",
             "fix_note", "previous_text", "research")
+    if job["payload"].get("followup"):
+        keep = keep + ("sent_text", "sent_ts", "sent_lines", "bumps", "attachments")
     leads = []
     for l in load_dm_leads():
         if l.get("id") in ids:
@@ -1556,6 +1656,7 @@ def dm_payload_for_write(job):
     # His real first messages are the voice ground truth, the replied ones first.
     examples = sorted(sends, key=lambda s: not s.get("replied"))[:12]
     return {"job_id": job["id"], "kind": "dmwrite", "note": job["payload"].get("note"),
+            "mode": "followup" if job["payload"].get("followup") else "first",
             "leads": leads,
             "campaigns": {c: camps[c] for c in used if c in camps},
             "sent_examples": [{"channel": s.get("channel"), "campaign": s.get("campaign"),
@@ -1588,6 +1689,18 @@ def agent_write_dm(job, body):
                         for v in (it.get("variants") or []) if isinstance(v, dict) and str(v.get("text") or "").strip()]
             if it.get("flag"):
                 lead["flag"] = "; ".join(x for x in (lead.get("flag"), str(it["flag"])[:300]) if x)
+            if job["payload"].get("followup"):
+                fu = [{"label": str(v.get("label") or "Follow-up")[:40], "text": str(v.get("text"))[:DM_TEXT_MAX]}
+                      for v in (it.get("followup_variants") or it.get("variants") or [])
+                      if isinstance(v, dict) and str(v.get("text") or "").strip()]
+                if fu and lead.get("status") == "sent":
+                    lead["followup_variants"] = fu[:3]
+                    written += 1
+                if it.get("no_followup"):
+                    lead["no_followup"] = str(it["no_followup"])[:200]
+                lead.pop("writing_job", None)
+                lead["updated_ts"] = now_str()
+                continue
             if it.get("not_a_fit") and lead.get("status") == "ready":
                 # The ICP gate: no message for someone outside the campaign's ICP.
                 # Lands in Done with Claude's reason; "Back" in the app undoes it.
@@ -2594,6 +2707,167 @@ def token_hash(token):
     return hmac.new(b"sidekick-job", token.encode(), "sha256").hexdigest()
 
 
+
+# ---------------------------------------------------------------- phone notifications
+#
+# Web Push with no payload: the server only knocks, and the app's service
+# worker then reads /push/last (counts only, no names) and shows it. With no
+# payload there is nothing to encrypt, so all this needs is a VAPID signature:
+# ES256 over P-256, done here in plain Python so the phone's server runs it
+# without extra packages. Keys and subscriptions live in the data folder and
+# are never synced: each server knocks on the devices that subscribed to it.
+
+PUSH_FILE = os.path.join(DATA_DIR, "push.json")
+_EC_P = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff
+_EC_N = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551
+_EC_G = (0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296,
+         0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5)
+
+
+def _ec_add(a, b):
+    if a is None:
+        return b
+    if b is None:
+        return a
+    if a[0] == b[0] and (a[1] + b[1]) % _EC_P == 0:
+        return None
+    if a == b:
+        m = (3 * a[0] * a[0] - 3) * pow(2 * a[1], _EC_P - 2, _EC_P) % _EC_P
+    else:
+        m = (b[1] - a[1]) * pow((b[0] - a[0]) % _EC_P, _EC_P - 2, _EC_P) % _EC_P
+    x = (m * m - a[0] - b[0]) % _EC_P
+    return (x, (m * (a[0] - x) - a[1]) % _EC_P)
+
+
+def _ec_mul(k, pt):
+    out = None
+    while k:
+        if k & 1:
+            out = _ec_add(out, pt)
+        pt = _ec_add(pt, pt)
+        k >>= 1
+    return out
+
+
+def _b64u(b):
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+
+def load_push():
+    try:
+        with open(PUSH_FILE) as fh:
+            st = json.load(fh)
+    except (OSError, ValueError):
+        st = {}
+    if not st.get("d"):
+        d = secrets.randbelow(_EC_N - 1) + 1
+        st = {"d": hex(d), "subs": [], "last": None}
+        save_push(st)
+    return st
+
+
+def save_push(st):
+    tmp = PUSH_FILE + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(st, fh)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, PUSH_FILE)
+
+
+def push_public_key(st=None):
+    d = int((st or load_push())["d"], 16)
+    x, y = _ec_mul(d, _EC_G)
+    return _b64u(b"\x04" + x.to_bytes(32, "big") + y.to_bytes(32, "big"))
+
+
+def _vapid_jwt(aud, d):
+    head = _b64u(json.dumps({"typ": "JWT", "alg": "ES256"}).encode())
+    claims = _b64u(json.dumps({"aud": aud, "exp": int(time.time()) + 12 * 3600,
+                               "sub": "https://github.com/abhiijay/x-sidekick"}).encode())
+    msg = (head + "." + claims).encode()
+    z = int.from_bytes(hashlib.sha256(msg).digest(), "big")
+    while True:
+        k = secrets.randbelow(_EC_N - 1) + 1
+        r = _ec_mul(k, _EC_G)[0] % _EC_N
+        sig = pow(k, _EC_N - 2, _EC_N) * (z + r * d) % _EC_N
+        if r and sig:
+            break
+    return head + "." + claims + "." + _b64u(r.to_bytes(32, "big") + sig.to_bytes(32, "big"))
+
+
+def push_subscribe(body):
+    sub = body.get("subscription") if isinstance(body.get("subscription"), dict) else {}
+    ep = str(sub.get("endpoint") or "")
+    if not ep.startswith("https://"):
+        return 400, {"error": "subscription endpoint required"}
+    with LOCK:
+        st = load_push()
+        st["subs"] = [x for x in st.get("subs") or [] if x.get("endpoint") != ep]
+        if not body.get("off"):
+            st["subs"].append({"endpoint": ep, "ts": now_str(), "device": str(body.get("device") or "")[:60]})
+        save_push(st)
+    return 200, {"ok": True, "devices": len(st["subs"])}
+
+
+def push_notify(title, text, tag="sidekick"):
+    """Knock on every subscribed device. Runs in its own thread."""
+    with LOCK:
+        st = load_push()
+        st["last"] = {"title": str(title)[:80], "body": str(text)[:160], "tag": tag, "ts": now_str()}
+        save_push(st)
+        subs, d = list(st.get("subs") or []), int(st["d"], 16)
+    if not subs:
+        return
+
+    def go():
+        key, dead = push_public_key({"d": hex(d)}), []
+        for sub in subs:
+            u = urlparse(sub["endpoint"])
+            req = urllib.request.Request(sub["endpoint"], data=b"", method="POST")
+            req.add_header("TTL", "86400")
+            req.add_header("Urgency", "normal")
+            req.add_header("Authorization", "vapid t=%s, k=%s" % (_vapid_jwt(u.scheme + "://" + u.netloc, d), key))
+            try:
+                urllib.request.urlopen(req, timeout=20).read()
+            except urllib.error.HTTPError as e:
+                if e.code in (404, 410):
+                    dead.append(sub["endpoint"])     # the device unsubscribed
+                else:
+                    log("push failed %s: %s" % (e.code, e.read(200)))
+            except (urllib.error.URLError, OSError) as e:
+                log("push failed: %s" % e)
+        if dead:
+            with LOCK:
+                st2 = load_push()
+                st2["subs"] = [x for x in st2.get("subs") or [] if x.get("endpoint") not in dead]
+                save_push(st2)
+    threading.Thread(target=go, daemon=True).start()
+
+
+def notify_job_end(job):
+    """One short line when a Claude run ends. Counts only: /push/last is public."""
+    kind, ok = job.get("kind"), job.get("status") == "done"
+    try:
+        if not ok:
+            name = {"draft": "Drafting", "dmwrite": "Writing", "leadfind": "Find more", "scout": "Scout"}.get(kind, "A run")
+            push_notify(name + " failed", "Open Sidekick to retry.", "fail-" + str(kind))
+        elif kind == "draft":
+            n = sum(1 for i in load_queue() if i.get("status") == "drafted")
+            push_notify("Replies ready", "%d to post in Ready." % n, "draft")
+        elif kind == "dmwrite":
+            fu = job["payload"].get("followup")
+            push_notify("Follow-ups written" if fu else "Messages written",
+                        "%d %s." % (len(job["payload"].get("lead_ids") or []),
+                                    "follow-ups to check" if fu else "people in To send"), "dmwrite")
+        elif kind == "leadfind":
+            run = next((r for r in load_find_runs() if r.get("job_id") == job["id"]), {})
+            push_notify("Find more finished", "Added %d people." % len(run.get("added") or []), "find")
+        elif kind == "scout":
+            push_notify("Scout finished", "New posts to pick from.", "scout")
+    except Exception as e:  # a notification must never break a job
+        log("notify failed: %r" % e)
+
+
 def create_job(kind, payload):
     token = secrets.token_urlsafe(32)
     job = {
@@ -2620,10 +2894,15 @@ def update_job(job_id, **fields):
         jobs = load_jobs()
         for j in jobs:
             if j["id"] == job_id:
+                was = j.get("status")
                 j.update(fields)
                 save_jobs(jobs)
-                return j
-    return None
+                break
+        else:
+            return None
+    if j.get("status") in ("done", "failed") and was not in ("done", "failed"):
+        notify_job_end(j)
+    return j
 
 
 def get_job(job_id):
@@ -3636,6 +3915,11 @@ class AppHandler(BaseHandler):
             return self._redirect("/app/")
         if path.startswith("/app"):
             return self._static(path)
+        if path == "/push/last":
+            # Read by the service worker after a knock. Counts only, no names,
+            # so it needs no password (a worker has no access to the app's).
+            last = load_push().get("last") or {}
+            return self._json(200, {k: last.get(k) for k in ("title", "body", "tag", "ts")})
         if path.startswith("/api/"):
             return self._api("GET", path)
         if path.startswith("/agent/"):
@@ -3689,6 +3973,10 @@ class AppHandler(BaseHandler):
         body = body or {}
         try:
             if method == "GET":
+                if path == "/api/push/key":
+                    with LOCK:
+                        st = load_push()
+                    return self._json(200, {"key": push_public_key(st), "devices": len(st.get("subs") or [])})
                 if path == "/api/health":
                     with LOCK:
                         h = health_counts()
@@ -3827,6 +4115,13 @@ class AppHandler(BaseHandler):
                 return self._json(*find_add_unchecked(body))
             if path == "/api/dm/write":
                 return self._json(*start_write_job(body))
+            if path == "/api/dm/followup":
+                return self._json(*start_followup_job(body))
+            if path == "/api/push/subscribe":
+                return self._json(*push_subscribe(body))
+            if path == "/api/push/test":
+                push_notify("Sidekick", "Notifications are on.", "test")
+                return self._json(200, {"ok": True, "devices": len(load_push().get("subs") or [])})
             if path == "/api/dm/feedback-all":
                 return self._json(*dm_feedback_all(body))
             if path == "/api/dm/feedback":
