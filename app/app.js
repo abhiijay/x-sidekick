@@ -247,6 +247,25 @@ window.addEventListener('popstate', () => {
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('sheet').hidden) closeSheet(); });
 
+/* Redraws keep the one-by-one card where it was on screen, so Later,
+ * Previous, Up next and background refreshes never throw the page around.
+ * A card whose top had scrolled out of view comes back with its top just
+ * under the header. */
+function visibleCard() { return [...document.querySelectorAll('.focus-card')].find((c) => c.offsetParent) || null; }
+function keepCard(draw) {
+  const old = visibleCard();
+  const y = old ? old.getBoundingClientRect().top : null;
+  draw();
+  if (y == null) return;
+  const card = visibleCard();
+  if (!card) return;
+  const head = document.querySelector('.top').getBoundingClientRect().bottom;
+  const want = y < head + 4 ? head + 8 : y;
+  const d = card.getBoundingClientRect().top - want;
+  if (Math.abs(d) > 1) window.scrollBy(0, d);
+}
+const anchoring = { on: false };
+
 /* A short tap of vibration on the actions that change something. */
 function buzz(ms = 12) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch { /* not supported */ } }
 
@@ -787,9 +806,10 @@ function renderReady(allReady, emptyText) {
   if (i < 0) i = Math.min(rp.idx, ready.length - 1);
   const it = ready[i];
   rp.focus = it.id; rp.idx = i; LS.set('rp_focus', it.id);
-  const go = (k) => { rp.focus = ready[k].id; renderReplies(); window.scrollTo(0, 0); };
+  const go = (k) => { rp.focus = ready[k].id; renderReplies(); };
   const card = draftCard(it, { focus: true });
-  card.prepend(el('div', { class: 'focus-top' }, el('span', { class: 'focus-count', text: (i + 1) + ' of ' + ready.length })));
+  card.prepend(el('div', { class: 'focus-top' }, el('span', { class: 'focus-count', text: (i + 1) + ' of ' + ready.length }),
+    stepArrows(i, ready.length, (k) => go(k))));
   attachSwipe(card, () => card.onPosted({ target: el('button') }), card.onSkip);
   card.append(el('div', { class: 'focus-nav' },
     el('button', { class: 'link', text: '‹ Previous', disabled: i === 0, onclick: () => go(i - 1) }),
@@ -916,6 +936,7 @@ function renderDone() {
 }
 
 function renderReplies() {
+  if (!anchoring.on) { anchoring.on = true; try { keepCard(() => renderReplies()); } finally { anchoring.on = false; } return; }
   state.repliesStale = false;
   if (backGuard.on && !somethingOpen()) releaseBack();
   // Freshest post first: a reply is worth most in the first hours.
@@ -2415,7 +2436,6 @@ function focusOn(mode, id) {
   li.view[mode] = 'focus';
   LS.set('li_view_' + mode, 'focus');
   renderDm('linkedin');
-  window.scrollTo(0, 0);
 }
 
 function viewToggle(mode, count) {
@@ -2465,9 +2485,19 @@ function upNext(mode, list, from) {
       tierPill(l.tier))));
 }
 
-function focusHeader(i, total, l) {
+function focusHeader(i, total, l, mode, list) {
   return el('div', { class: 'focus-top' },
-    el('span', { class: 'focus-count', text: (i + 1) + ' of ' + total }), tierPill(l.tier), campPill(l.campaign));
+    el('span', { class: 'focus-count', text: (i + 1) + ' of ' + total }),
+    mode && list ? stepArrows(i, total, (k) => { li.focus[mode] = list[k].id; renderDm('linkedin'); }) : null,
+    el('span', { class: 'spacer' }), tierPill(l.tier), campPill(l.campaign));
+}
+/* ‹ › beside "2 of 6": they sit at the top of the card, which stays still,
+ * so stepping through people never needs a scroll. */
+function stepArrows(i, total, go) {
+  if (total < 2) return null;
+  return el('span', { class: 'step-arrows' },
+    el('button', { class: 'step', 'aria-label': 'Previous', text: '‹', disabled: i === 0, onclick: () => { buzz(6); go(i - 1); } }),
+    el('button', { class: 'step', 'aria-label': 'Next', text: '›', onclick: () => { buzz(6); go((i + 1) % total); } }));
 }
 function focusFacts(l) {
   const facts = [l.score != null && l.score !== '' ? 'Score ' + l.score : null, l.icp || null, l.source || null,
@@ -2493,7 +2523,7 @@ function connectFocus(list, nodes) {
   const l = list[i];
   const opened = dm.opened.has(l.id);
   const card = el('div', { class: 'card focus-card' + (opened ? ' opened' : '') });
-  card.append(focusHeader(i, list.length, l),
+  card.append(focusHeader(i, list.length, l, 'connect', list),
     el('div', { class: 'focus-name', text: l.name || 'LinkedIn profile' }),
     l.product ? el('div', { class: 'focus-product', text: l.product }) : null);
   // Right under the name, so it is in view the moment he comes back from LinkedIn.
@@ -2692,7 +2722,7 @@ function pdfBadge(l) {
 function pdfWaitingCard(list, i, nodes) {
   const l = list[i];
   const card = el('div', { class: 'card focus-card' });
-  card.append(focusHeader(i, list.length, l),
+  card.append(focusHeader(i, list.length, l, 'message', list),
     el('div', { class: 'focus-name', text: l.name || 'LinkedIn lead' }),
     l.product ? el('div', { class: 'focus-product', text: l.product }) : null,
     pdfBadge(l), pdfActions(l), dmFlags(l, ''),
@@ -2722,7 +2752,7 @@ function messageFocus(list, nodes) {
   if (pdfPending(l) && !hasMessage(l)) { pdfWaitingCard(list, i, nodes); return; }
   const opened = dm.opened.has(l.id);
   const card = el('div', { class: 'card focus-card' + (opened ? ' opened' : '') });
-  card.append(focusHeader(i, list.length, l),
+  card.append(focusHeader(i, list.length, l, 'message', list),
     el('div', { class: 'focus-name', text: l.name || 'LinkedIn lead' }),
     l.product ? el('div', { class: 'focus-product', text: l.product }) : null);
   if (opened) card.append(el('div', { class: 'focus-hint', text: 'Sent it? Tap Sent. Changed it in LinkedIn? Paste what you sent over the text first.' }));
@@ -3196,6 +3226,7 @@ async function bulkSkip(list) {
 
 /* -- panel -- */
 function renderDm(ch, keepLinesOpenFor) {
+  if (!anchoring.on) { anchoring.on = true; try { keepCard(() => renderDm(ch, keepLinesOpenFor)); } finally { anchoring.on = false; } return; }
   const root = $('dm-' + ch);
   if (!root) return;
   if (backGuard.on && !somethingOpen()) releaseBack();

@@ -565,3 +565,14 @@ html, body { overscroll-behavior-y: contain; }
 .action-sheet .tpl-head .btn { display: inline-flex; width: auto; flex: none; padding: 7px 16px; font-size: 14px; border-radius: 10px;
   background: var(--accent); color: var(--on-fill); text-align: center; }
 .tpl-head b { white-space: nowrap; font-size: 15px; }
+
+/* one-by-one: steady header, arrows by the count */
+.title-wrap { position: relative; }
+.updated { position: absolute; left: 0; top: 100%; white-space: nowrap; margin-top: -1px; }
+.focus-top .spacer { flex: 1; }
+.focus-count { margin-right: 0; }
+.step-arrows { display: inline-flex; gap: 4px; margin-left: 6px; }
+.step { width: 34px; height: 30px; border-radius: 9px; border: 1px solid var(--line-strong); background: var(--surface-2);
+  color: var(--text); font-size: 20px; line-height: 1; display: grid; place-items: center; padding: 0 0 2px; }
+.step:disabled { opacity: .35; }
+.step:active { transform: scale(.94); }
