@@ -61,7 +61,10 @@ def test(url, token):
 
 def main():
     have = read_env()
-    token = have.get("SIDEKICK_SHEET_TOKEN") or secrets.token_urlsafe(32)
+    typed = input("Token you put in the sheet's TOKEN property (press Enter to make a new one): ").strip()
+    token = typed or have.get("SIDEKICK_SHEET_TOKEN") or secrets.token_urlsafe(32)
+    if len(token) < 16:
+        sys.exit("That token is too short. Use at least 16 characters. Nothing saved.")
     print("STEP 1. In the sheet: Extensions > Apps Script.")
     print("  - Replace everything in Code.gs with the file at:")
     print("    " + CODE)
