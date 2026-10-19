@@ -822,7 +822,8 @@ def dm_view():
     return {"leads": shown, "libraries": libs, "stats": dm_stats(leads, load_dm_state()),
             "cooldown_min": DM_COOLDOWN_MIN, "campaigns": camps, "versions": version_stats(leads),
             "templates": load_dm_templates(), "template_slots": list(TEMPLATE_SLOTS),
-            "sender": SHEET_SENDER, "sheet_on": bool(SHEET_URL and SHEET_TOKEN), "account_stage": ACCOUNT_STAGE}
+            "sender": SHEET_SENDER, "sheet_on": bool(SHEET_URL and SHEET_TOKEN), "account_stage": ACCOUNT_STAGE,
+            "check_on": routine_configured() or bool(PEER_URL and ROUTINE_FIRE_URL and ROUTINE_TOKEN)}
 
 
 def version_label(sent_lines):
@@ -1471,6 +1472,11 @@ def start_find_job(body):
     # LinkedIn: "sheet" takes researched people with an empty Sender; "apps"
     # looks on launch sites. X has no sheet, so it is always "apps".
     source = "sheet" if channel == "linkedin" and body.get("source") == "sheet" else "apps"
+    if not routine_configured():
+        return 400, {"error": ("Find more runs on your other device's server: open the app at that address."
+                               if PEER_URL and ROUTINE_FIRE_URL and ROUTINE_TOKEN else
+                               "Claude's check is not set up on this sidekick, so Find more is off (it would add "
+                               "people nobody checked). Run python server/set_routine.py on this phone once.")}
     if source == "sheet" and not (SHEET_URL and SHEET_TOKEN):
         return 400, {"error": "This sidekick is not connected to the lead sheet yet. "
                               "Run set_sheet.py on it once, then try again."}
@@ -1540,10 +1546,12 @@ def run_find_stage1(job_id, token):
             update_job(job_id, status="scoring", progress="%d candidates, Claude is checking fit" % len(cands))
             fire_routine(get_job(job_id), token)
         else:
-            added = add_found_leads(job_id, [{"key": c["key"]} for c in cands[:p["want"]]],
-                                    note="Not checked by Claude (routine is off)")
-            update_job(job_id, status="done", report="Added %d without Claude's check. %s"
-                       % (added, find_summary(report)))
+            # Never add people Claude has not checked on its own: they would go
+            # straight to Connect and spend the weekly requests. They wait here
+            # until the check is set up, or he adds them by hand from the sheet.
+            update_job(job_id, status="done", error="Claude's check is not set up on this sidekick, so nobody "
+                       "was added. %d found are waiting. Set it up with set_routine.py, then run Find more "
+                       "again. %s" % (len(cands), find_summary(report)))
     except Exception as e:  # never kill the server from a background run
         log("find failed: %r" % e)
         update_job(job_id, status="failed", error=str(e)[:300])

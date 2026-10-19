@@ -597,3 +597,4 @@ button.ns-tile:disabled { opacity: .6; }
   background: var(--warn-soft); color: var(--text); font-size: 13px; line-height: 1.4; }
 .ns-result b { color: var(--warn); font-size: 13px; }
 .nb-list .ns-result { margin: 0 0 8px; }
+.sheet-note.warn { color: var(--warn); font-weight: 600; }

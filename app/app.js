@@ -1363,6 +1363,7 @@ function takeDm(d) {
   dm.templates = d.templates || {};
   dm.sender = d.sender || 'a1';
   dm.sheetOn = !!d.sheet_on;
+  dm.checkOn = d.check_on !== false;
   // A buyer never shows the Non-ICP notes (Try it, Your take, Can I): those
   // wait aside, and the card asks for the research the buyer messages need.
   for (const l of dm.leads) {
@@ -2247,6 +2248,7 @@ function openFindSheet(which) {
       try { const r = await api('/api/leads/find/add-unchecked', { job_id: fr.job_id }); toast('Added ' + r.added); await refresh(); } catch (err) { toast(err.message, true); }
     } }) : null;
   sheetCustom(ch === 'x' ? 'Find more X leads' : 'Find more people to connect with', [
+    dm.checkOn ? null : el('div', { class: 'sheet-note warn', text: "Claude's check is not set up on this sidekick, so Find more will not add anyone. Run python server/set_routine.py on this phone once." }),
     el('div', { class: 'sheet-label', text: 'For' }), campSeg,
     ch === 'linkedin' ? el('div', { class: 'sheet-label', text: 'From · this sidekick is ' + dm.sender }) : null,
     ch === 'linkedin' ? srcSeg : null,
