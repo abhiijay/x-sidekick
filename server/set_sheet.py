@@ -91,7 +91,7 @@ def main():
         subprocess.run(["sidekick"])
     else:
         print("Restart the server so it reads the sheet settings (on the Mac: server/start.sh).")
-    print("Find more on LinkedIn now takes free people from the sheet first, and marks them %s." % sender)
+    print("Find more > Spreadsheet now takes free people from the sheet and marks them %s. Third-party apps adds new people to the sheet as %s." % (sender, sender))
 
 
 if __name__ == "__main__":
