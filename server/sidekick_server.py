@@ -115,6 +115,10 @@ SHEET_TOKEN = env("SIDEKICK_SHEET_TOKEN")
 SHEET_EVERY_S = max(20, int(env("SIDEKICK_SHEET_EVERY_S", "60") or 60))
 # The sheet's Sender column: which LinkedIn account this phone works from.
 SHEET_SENDER = (env("SIDEKICK_SHEET_SENDER", "a1") or "a1").strip().lower()
+# How established this LinkedIn account is. A "new" account (few connections,
+# no history) gets few accepts from big founders, and every request counts
+# against the weekly limit, so Find more only offers people it can reach.
+ACCOUNT_STAGE = "new" if (env("SIDEKICK_ACCOUNT_STAGE", "") or "").strip().lower() == "new" else "established"
 if PEER_URL and PEER_URL == PUBLIC_URL:
     # The public URL belongs to the peer, so Claude's callbacks would land there
     # and not here. Find more and Write with Claude stay on the peer.
@@ -818,7 +822,7 @@ def dm_view():
     return {"leads": shown, "libraries": libs, "stats": dm_stats(leads, load_dm_state()),
             "cooldown_min": DM_COOLDOWN_MIN, "campaigns": camps, "versions": version_stats(leads),
             "templates": load_dm_templates(), "template_slots": list(TEMPLATE_SLOTS),
-            "sender": SHEET_SENDER, "sheet_on": bool(SHEET_URL and SHEET_TOKEN)}
+            "sender": SHEET_SENDER, "sheet_on": bool(SHEET_URL and SHEET_TOKEN), "account_stage": ACCOUNT_STAGE}
 
 
 def version_label(sent_lines):
@@ -1519,6 +1523,10 @@ def run_find_stage1(job_id, token):
             require_pricing=bool(find_cfg.get("require_pricing", True)),
             time_budget=int(find_cfg.get("time_budget_s") or 420),
             progress=lambda msg: update_job(job_id, progress=msg[:120]))
+        if source != "sheet":
+            cands, dropped = fit_for_account(cands, p["want"] * 2)
+            if dropped:
+                report["errors"].append("%d left out as too big for a new account" % dropped)
         cands = sheet_cands + cands
         if sheet_note:
             report["sheet"] = sheet_note
@@ -2697,6 +2705,8 @@ def sheet_pool(touched, want):
         rev = re.sub(r"[^0-9.]", "", str(p.get("revenue") or ""))
         rev = float(rev) if rev else None
         pts = 9 if rev and rev >= 500 else 7
+        if ACCOUNT_STAGE == "new":
+            pts = 8 if rev and 500 <= rev < 5000 else 7
         maker = str(p.get("founder") or "").strip()
         out.append({"source": "Lead sheet", "product": p.get("company") or "", "site": p.get("website") or "",
                     "tagline": str(p.get("description") or "")[:200], "maker": maker, "first": maker.split(" ")[0] if maker else "",
@@ -2704,10 +2714,61 @@ def sheet_pool(touched, want):
                     "linkedin": p.get("linkedin"), "category": p.get("category") or "", "launch": None, "age_days": None,
                     "score": pts, "score_why": "from the lead sheet (%s)%s" % (p.get("from"), ", revenue on file" if rev else ""),
                     "tier": "Contact this week" if pts >= 8 else "Next batch", "key": key,
-                    "sheet_id": p.get("sheet_id") or "", "notes": str(p.get("notes") or "")[:200], "prices": []})
-        if len(out) >= want * 2:
+                    "sheet_id": p.get("sheet_id") or "", "notes": str(p.get("notes") or "")[:200], "prices": [],
+                    "revenue_usd": rev})
+        if ACCOUNT_STAGE != "new" and len(out) >= want * 2:
             break
-    return out, "Lead sheet: %d free, %d taken for this run" % (len(pool), min(len(out), want * 2))
+    out, dropped = fit_for_account(out, want * 2)
+    note = "Lead sheet: %d free, %d taken for this run" % (len(pool), min(len(out), want * 2))
+    if ACCOUNT_STAGE == "new":
+        note += ", %d left out as too big for a new account" % dropped
+    return out[:want * 2], note
+
+
+BIG_MARKS = re.compile(r"\b(yc|y combinator|series [a-d]|seed|funded|vc-backed|a16z|sequoia|raised|"
+                       r"very large|team >\s*5|acquired|exit|former ceo|forbes|unicorn|enterprise|"
+                       r"\d{2,3}k\+? (?:followers|users)|top voice)\b", re.I)
+
+
+def money_month(text):
+    """Largest "$12,345" figure in a note, or None."""
+    vals = [float(v.replace(",", "")) for v in re.findall(r"\$\s?([\d,]+(?:\.\d+)?)", text or "")]
+    vals = [v for v in vals if v >= 50]
+    return max(vals) if vals else None
+
+
+def reach_of(c):
+    """How likely a founder is to accept a request from a small, new account:
+    "good" (small or indie), "stretch" (worth a few), "big" (rarely accepts a
+    stranger). Judged from revenue, upvotes and notes on file."""
+    text = " ".join(str(c.get(k) or "") for k in ("headline", "notes", "score_why", "tagline", "flag"))
+    rev = c.get("revenue_usd")
+    if rev is None:
+        rev = money_month(c.get("notes"))
+    votes = re.search(r"(\d{2,5}) upvotes", text)
+    votes = int(votes.group(1)) if votes else 0
+    if BIG_MARKS.search(text) or (rev or 0) >= 20000 or votes >= 500:
+        return "big"
+    if (rev or 0) >= 5000 or votes >= 350:
+        return "stretch"
+    return "good"
+
+
+def fit_for_account(cands, want):
+    """A new account: drop the big names, small founders first, a few stretches.
+    An established account keeps the order it had."""
+    if ACCOUNT_STAGE != "new":
+        return cands, 0
+    good, stretch, dropped = [], [], 0
+    for c in cands:
+        r = reach_of(c)
+        c["reach"] = r
+        if r == "big":
+            dropped += 1
+        else:
+            (good if r == "good" else stretch).append(c)
+    room = max(1, want // 5)              # at most a fifth are stretches
+    return good + stretch[:room], dropped + max(0, len(stretch) - room)
 
 
 def sheet_pull_touched():
@@ -3823,6 +3884,12 @@ def agent_job_payload(job):
         return {"job_id": job["id"], "kind": "leadfind", "campaign": job["payload"].get("campaign"),
                 "channel": job["payload"].get("channel"), "want": job["payload"].get("want"),
                 "rules": camp, "candidates": run.get("candidates") or [],
+                "account": {"sender": run.get("sender") or SHEET_SENDER, "stage": ACCOUNT_STAGE,
+                            "note": ("This LinkedIn account is new: few connections, no history. Keep only founders "
+                                     "likely to accept a stranger: solo or small-team founders, indie and early "
+                                     "products, under about $20k a month, not famous, not VC-backed, not big-audience "
+                                     "creators. Drop anyone who rarely accepts cold requests; a wasted request "
+                                     "costs one of the few allowed each week.") if ACCOUNT_STAGE == "new" else ""},
                 "write_to": "/agent/job/%s/leads" % job["id"]}
     run = next((r for r in load_scout_runs() if r["job_id"] == job["id"]), None)
     return {"job_id": job["id"], "kind": "scout",
