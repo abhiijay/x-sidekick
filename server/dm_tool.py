@@ -63,7 +63,7 @@ STATUSES = ("ready", "sent", "replied", "skipped", "cant_dm", "requested")
 CONTENT_FIELDS = ("campaign", "batch", "n", "name", "handle", "recipient_id", "profile_url",
                   "product", "followers", "meta", "flag", "drop", "variants", "library", "attachments", "variant_index",
                   "fields", "note", "kind", "headline", "site", "tagline", "tier", "score",
-                  "icp", "context", "needs_message", "source", "launch")
+                  "icp", "context", "needs_message", "source", "launch", "sender")
 # Carried over only when a lead is first added (history from before the app).
 HISTORY_FIELDS = ("sent_ts", "sent_text", "reply_text", "reply_ts", "requested_ts",
                   "accepted_ts", "skip_reason")

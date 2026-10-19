@@ -1361,6 +1361,8 @@ function takeDm(d) {
   dm.campaigns = d.campaigns || {};
   dm.versions = d.versions || {};
   dm.templates = d.templates || {};
+  dm.sender = d.sender || 'a1';
+  dm.sheetOn = !!d.sheet_on;
   // A buyer never shows the Non-ICP notes (Try it, Your take, Can I): those
   // wait aside, and the card asks for the research the buyer messages need.
   for (const l of dm.leads) {
@@ -2192,11 +2194,29 @@ function openFindSheet(which) {
   const drawCamps = () => campSeg.replaceChildren(...camps.map(([k, v]) => el('button', {
     class: k === camp ? 'on' : '', text: v.label || k, onclick: () => { camp = k; LS.set('find_camp_' + ch, k); drawCamps(); } })));
   drawCamps();
+  // LinkedIn: where to look. Spreadsheet = people already researched into the
+  // lead sheet that no account has taken. Third-party apps = fresh launches;
+  // whoever is added goes into the sheet as a new row under this account.
+  let src = ch === 'linkedin' && LS.get('find_src', 'sheet') === 'apps' ? 'apps' : 'sheet';
+  const srcSeg = el('div', { class: 'sheet-seg' });
+  const srcNote = el('div', { class: 'sheet-note' });
+  const drawSrc = () => {
+    srcSeg.replaceChildren(...[['sheet', 'Spreadsheet'], ['apps', 'Third-party apps']].map(([k, label]) => el('button', {
+      class: k === src ? 'on' : '', text: label, onclick: () => { src = k; LS.set('find_src', k); drawSrc(); } })));
+    srcNote.textContent = src === 'sheet'
+      ? (dm.sheetOn
+        ? 'People already in the lead sheet with an empty Sender. Each one you get is marked ' + dm.sender + ' in the sheet, so the other account never gets them.'
+        : 'This sidekick is not connected to the lead sheet yet. Run set_sheet.py on it once.')
+      : 'Fresh launches from Uneed and Fazier (last 45 days). Only makers who listed their own LinkedIn, product site checked, nobody already contacted. Everyone added goes into the lead sheet as a new row marked ' + dm.sender + '.';
+  };
+  if (ch === 'linkedin') drawSrc();
   const run = async (n) => {
     closeSheet();
     LS.set('find_want_' + ch, String(n));
     try {
-      await api('/api/leads/find', { campaign: camp, channel: ch, want: n });
+      await api('/api/leads/find', ch === 'linkedin'
+        ? { campaign: camp, channel: ch, want: n, source: src, days: src === 'apps' ? 45 : 14 }
+        : { campaign: camp, channel: ch, want: n });
       toast('Looking for ' + n + '. Takes a few minutes, keep working.');
     } catch (e) { toast(e.message, true); }
     loadFind();
@@ -2228,12 +2248,14 @@ function openFindSheet(which) {
     } }) : null;
   sheetCustom(ch === 'x' ? 'Find more X leads' : 'Find more people to connect with', [
     el('div', { class: 'sheet-label', text: 'For' }), campSeg,
+    ch === 'linkedin' ? el('div', { class: 'sheet-label', text: 'From · this sidekick is ' + dm.sender }) : null,
+    ch === 'linkedin' ? srcSeg : null,
     el('div', { class: 'sheet-label', text: 'How many' }), grid,
     el('div', { class: 'sheet-row' }, other),
     el('div', { class: 'sheet-row' }, go),
-    el('div', { class: 'sheet-note', text: ch === 'x'
-      ? 'Founders on X who fit this campaign, nobody you already contacted. Claude checks the fit before they show up in To send, in a few minutes.'
-      : 'Fresh launches from Peerlist, Uneed and Fazier. Only makers who listed their own LinkedIn, product site checked, nobody you already contacted. Claude checks the fit before they show up here, in a few minutes.' }),
+    ch === 'x'
+      ? el('div', { class: 'sheet-note', text: 'Founders on X who fit this campaign, nobody you already contacted. Claude checks the fit before they show up in To send, in a few minutes.' })
+      : srcNote,
     status ? el('div', { class: 'sheet-note', text: 'Last run: ' + status }) : null,
     unchecked,
   ].filter(Boolean));

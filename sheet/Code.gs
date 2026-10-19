@@ -118,7 +118,7 @@ function doGet(e) {
   var people = [];
   for (var i = 0; i < rows.length; i++) {
     var s = slug_(rows[i][h.at.linkedin]);
-    if (s) people.push({ slug: s, status: rows[i][h.at.status], lead_id: rows[i][h.at.lead_id] });
+    if (s) people.push({ slug: s, status: rows[i][h.at.status], lead_id: rows[i][h.at.lead_id], sender: rows[i][h.at.sender] });
   }
   return out_({ ok: true, rows: rows.length, people: people });
 }

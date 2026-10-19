@@ -114,7 +114,7 @@ SHEET_URL = env("SIDEKICK_SHEET_URL")
 SHEET_TOKEN = env("SIDEKICK_SHEET_TOKEN")
 SHEET_EVERY_S = max(20, int(env("SIDEKICK_SHEET_EVERY_S", "60") or 60))
 # The sheet's Sender column: which LinkedIn account this phone works from.
-SHEET_SENDER = env("SIDEKICK_SHEET_SENDER", "a1") or "a1"
+SHEET_SENDER = (env("SIDEKICK_SHEET_SENDER", "a1") or "a1").strip().lower()
 if PEER_URL and PEER_URL == PUBLIC_URL:
     # The public URL belongs to the peer, so Claude's callbacks would land there
     # and not here. Find more and Write with Claude stay on the peer.
@@ -736,7 +736,20 @@ def lead_kind(lead):
     return lead.get("kind") or "message"
 
 
+def lead_sender(lead):
+    """Which LinkedIn account a person belongs to (a1, a2, ...). Leads from
+    before accounts were split all came from a1."""
+    return str(lead.get("sender") or "a1").strip().lower()
+
+
+def is_mine(lead):
+    """Each sidekick works one LinkedIn account and shows only its people.
+    X leads are not split by account."""
+    return lead.get("channel") != "linkedin" or lead_sender(lead) == SHEET_SENDER
+
+
 def dm_stats(leads, state):
+    leads = [l for l in leads if is_mine(l)]
     today = time.strftime("%Y-%m-%d")
     week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
     now = time.time()
@@ -777,7 +790,7 @@ def dm_view():
     Waiting = to connect, requested (until accepted, up to 90 days), to send.
     Only the libraries the listed leads use are sent along.
     """
-    leads = load_dm_leads()
+    leads = [l for l in load_dm_leads() if is_mine(l)]
     cutoff = (datetime.now() - timedelta(days=DM_RECENT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
     long_cut = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d %H:%M:%S")
     ready = [l for l in leads if l.get("status") == "ready"]
@@ -804,7 +817,8 @@ def dm_view():
              for k, v in load_dm_campaigns().items()}
     return {"leads": shown, "libraries": libs, "stats": dm_stats(leads, load_dm_state()),
             "cooldown_min": DM_COOLDOWN_MIN, "campaigns": camps, "versions": version_stats(leads),
-            "templates": load_dm_templates(), "template_slots": list(TEMPLATE_SLOTS)}
+            "templates": load_dm_templates(), "template_slots": list(TEMPLATE_SLOTS),
+            "sender": SHEET_SENDER, "sheet_on": bool(SHEET_URL and SHEET_TOKEN)}
 
 
 def version_label(sent_lines):
@@ -1197,6 +1211,16 @@ def touched_keys():
     return keys, names
 
 
+def lead_keys():
+    """'li:<slug>' for every LinkedIn person already in this sidekick."""
+    keys = set()
+    for l in load_dm_leads():
+        slug = linkedin_slug(l.get("profile_url") or "")
+        if slug:
+            keys.add("li:" + slug.lower().rstrip("/").rstrip("-"))
+    return keys
+
+
 def record_dm_send(lead):
     """Keep the message he sent. One record per lead; re-marking replaces it."""
     text = (lead.get("sent_text") or "").strip()
@@ -1439,19 +1463,25 @@ def start_find_job(body):
         return 400, {"error": "unknown campaign; load one with dm_tool.py campaign"}
     channel = body.get("channel") if body.get("channel") in DM_CHANNELS else "linkedin"
     want = clamp_int(body.get("want"), 1, FIND_MAX_WANT, 20)
-    days = clamp_int(body.get("days"), 3, 45, 14)
+    days = clamp_int(body.get("days"), 3, 60, 14)
+    # LinkedIn: "sheet" takes researched people with an empty Sender; "apps"
+    # looks on launch sites. X has no sheet, so it is always "apps".
+    source = "sheet" if channel == "linkedin" and body.get("source") == "sheet" else "apps"
+    if source == "sheet" and not (SHEET_URL and SHEET_TOKEN):
+        return 400, {"error": "This sidekick is not connected to the lead sheet yet. "
+                              "Run set_sheet.py on it once, then try again."}
     running = next((j for j in load_jobs() if j["kind"] == "leadfind"
                     and j["status"] in ("created", "fetching", "scoring", "fired", "working")
                     and j.get("expires", 0) > time.time()), None)
     if running:
         return 409, {"error": "a Find more run is already going", "job": public_job(running)}
     job, token = create_job("leadfind", {"campaign": campaign, "channel": channel,
-                                         "want": want, "days": days})
+                                         "want": want, "days": days, "source": source})
     with LOCK:
         runs = load_find_runs()
         runs.insert(0, {"id": "find_" + uuid.uuid4().hex[:8], "job_id": job["id"], "ts": now_str(),
                         "campaign": campaign, "channel": channel, "want": want, "days": days,
-                        "candidates": [], "added": [], "report": None})
+                        "source": source, "sender": SHEET_SENDER, "candidates": [], "added": [], "report": None})
         save_find_runs(runs)
     threading.Thread(target=run_find_stage1, args=(job["id"], token), daemon=True).start()
     return 200, {"ok": True, "job": public_job(get_job(job["id"]))}
@@ -1466,15 +1496,20 @@ def run_find_stage1(job_id, token):
         find_cfg = camp.get("find") or {}
         keys, names = touched_keys()
         update_job(job_id, status="fetching", progress="starting")
-        # LinkedIn: people in the lead sheet nobody has taken come first.
+        # Spreadsheet: only people in the lead sheet nobody has taken. Third-party
+        # apps: only fresh launches; whoever is added goes into the sheet as a
+        # new row with this sidekick's code in Sender (the sheet sync does it).
+        source = p.get("source") or "apps"
         sheet_cands, sheet_note = [], ""
-        if p["channel"] == "linkedin":
+        if source == "sheet":
             update_job(job_id, progress="reading the lead sheet")
             try:
-                sheet_cands, sheet_note = sheet_pool(keys, p["want"])
+                # Only people already in a sidekick count as taken here: the
+                # touched list also holds every sheet row, free ones included.
+                sheet_cands, sheet_note = sheet_pool(lead_keys(), p["want"])
             except Exception as e:
                 sheet_note = "Lead sheet: %s" % str(e)[:120]
-        rest = max(0, p["want"] - len(sheet_cands) // 2)
+        rest = 0 if source == "sheet" else p["want"]
         cands, report = ([], {"sources": {}, "errors": [], "stopped": None}) if rest == 0 else lead_finder.find(
             need="linkedin" if p["channel"] == "linkedin" else "x", want=rest,
             days=max(p["days"], clamp_int(find_cfg.get("days"), 3, 60, p["days"])),   # a campaign may look further back
@@ -1489,7 +1524,9 @@ def run_find_stage1(job_id, token):
             report["sheet"] = sheet_note
         update_find_run(job_id, candidates=cands, stage1=report)
         if not cands:
-            update_job(job_id, status="done", report="Nothing new passed the checks. " + find_summary(report))
+            why = ("Nobody free in the lead sheet. Try Third-party apps, or ask Claude in Cowork to research more people into the sheet. "
+                   if source == "sheet" else "Nothing new passed the checks. ")
+            update_job(job_id, status="done", report=why + find_summary(report))
             return
         if routine_configured():
             update_job(job_id, status="scoring", progress="%d candidates, Claude is checking fit" % len(cands))
@@ -1528,7 +1565,9 @@ def add_found_leads(job_id, keep, note=""):
     with LOCK:
         leads = load_dm_leads()
         have = {l.get("id") for l in leads}
-        taken, _ = touched_keys()
+        # Sheet people are in the touched list (the sheet is read into it), so
+        # for them only someone already in a sidekick counts as taken.
+        taken = lead_keys() if run.get("source") == "sheet" else touched_keys()[0]
         order = max([l.get("order") or 0 for l in leads] + [0])
         for k in keep:
             c = by_key.get(k.get("key"))
@@ -1555,7 +1594,7 @@ def add_found_leads(job_id, keep, note=""):
             if c.get("sheet_id"):
                 lead["sheet_id"] = c["sheet_id"]
             if run["channel"] == "linkedin":
-                lead.update(kind="connect", profile_url=c.get("linkedin"))
+                lead.update(kind="connect", profile_url=c.get("linkedin"), sender=run.get("sender") or SHEET_SENDER)
             else:
                 h = lead_x_handle(c.get("x"))
                 lead.update(kind="message", handle=h, profile_url="https://x.com/" + (h or ""),
@@ -2592,7 +2631,7 @@ def sheet_row(l, labels):
     camp = l.get("campaign") or ""
     return {"lead_id": l.get("id"), "linkedin": l.get("profile_url") or "", "status": status,
             "company": str(l.get("product") or "")[:120], "founder": str(l.get("name") or "")[:120],
-            "sender": SHEET_SENDER,
+            "sender": lead_sender(l),
             "request_sent": day("requested_ts"), "connected": day("accepted_ts"),
             "dm_sent": day("sent_ts"), "replied": day("reply_ts"),
             "website": str(l.get("site") or "")[:200], "notes": note,
@@ -2674,7 +2713,9 @@ def sheet_pool(touched, want):
 def sheet_pull_touched():
     """People the sheet lists count as already contacted for Find more."""
     people = sheet_call().get("people") or []
-    return touched_merge(["li:" + p["slug"] for p in people if p.get("slug")])
+    # A sheet that reports Sender: free rows (empty Sender) stay free.
+    return touched_merge(["li:" + p["slug"] for p in people if p.get("slug")
+                          and ("sender" not in p or str(p.get("sender") or "").strip())])
 
 
 def sheet_loop():
