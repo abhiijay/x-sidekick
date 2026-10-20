@@ -421,6 +421,10 @@ def queue_update(body):
             # what he tends to think about each kind of post.
             if isinstance(body.get("take"), str):
                 i["take"] = body["take"].strip()[:800]
+            # How he got from the post to what he sent, typed after sending.
+            # Optional; it shows the writer the reasoning, not just the result.
+            if isinstance(body.get("thinking"), str):
+                i["thinking"] = body["thinking"].strip()[:2000]
             save_queue(items)
             # The learning loop: his real wording goes straight into the durable
             # voice corpus, so it survives the queue being archived or trimmed.
@@ -491,7 +495,7 @@ def _retire_drafts(it, note, rejects):
     it["drafts"] = []
     it["status"] = "queued"
     # Nothing went out for this post yet, so a pre-filled "what you sent" goes too.
-    for k in ("chosen_index", "drafted_ts", "posted_text", "sent_verbatim"):
+    for k in ("chosen_index", "drafted_ts", "posted_text", "sent_verbatim", "thinking"):
         it.pop(k, None)
 
 
@@ -3351,7 +3355,12 @@ def record_send(item, verbatim=None):
         return
     with LOCK:
         sends = load_sends()
-        if any(_norm_send(s.get("posted_text")) == _norm_send(text) for s in sends):
+        same = next((s for s in sends if _norm_send(s.get("posted_text")) == _norm_send(text)), None)
+        if same is not None:
+            # Already recorded; the thinking is often typed after the send.
+            if item.get("thinking") and same.get("thinking") != item["thinking"]:
+                same["thinking"] = item["thinking"]
+                _save(SENDS_FILE, sends, "sends")
             return
         entry = {"post": (item.get("tweet_text") or item.get("text") or "")[:600],
                  "author": item.get("author"),
@@ -3363,6 +3372,8 @@ def record_send(item, verbatim=None):
             entry["verbatim"] = bool(verbatim)
         if item.get("take"):
             entry["take"] = item["take"]
+        if item.get("thinking"):
+            entry["thinking"] = item["thinking"]
         if item.get("post_type"):
             entry["post_type"] = item["post_type"]
         offered = [{"voice": draft_voice(d), "text": d.get("text", "")}
@@ -3389,7 +3400,8 @@ def add_send(body):
     item = {"tweet_text": str(body.get("post") or "")[:600],
             "author": str(body.get("author") or "")[:100],
             "url": str(body.get("url") or "")[:500],
-            "posted_text": text[:2000]}
+            "posted_text": text[:2000],
+            "thinking": str(body.get("thinking") or "").strip()[:2000]}
     before = len(load_sends())
     record_send(item, verbatim=False)
     after = len(load_sends())
@@ -3526,7 +3538,8 @@ def voice_examples():
         e = {"post": (post or "")[:400], "author": author, "posted_text": text}
         # post_type lets the writer pick the examples nearest to the post in
         # hand; take shows what he thought before he wrote it.
-        for f in ("post_type", "take", "verbatim"):
+        # thinking is how he got from the post to the reply.
+        for f in ("post_type", "take", "thinking", "verbatim"):
             if src.get(f) not in (None, ""):
                 e[f] = src[f]
         if src.get("sent_verbatim") is not None:

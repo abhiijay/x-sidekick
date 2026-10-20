@@ -598,8 +598,24 @@ function draftCard(it, opts = {}) {
   // which meant there was no way to enter it in the first place, and "Posted"
   // silently stored the draft as if it were what he sent - teaching the writer
   // its own output back.
+  // Optional: how he got from the post to what he sent. The reasoning teaches
+  // the writer more than the wording alone or a rejected draft does.
+  const thinking = el('textarea', { rows: 2, placeholder: 'Optional: what you noticed, the idea, what you cut and why' });
+  if (it.thinking) thinking.value = it.thinking;
+  let thinkTimer;
+  const saveThinking = async () => {
+    const text = thinking.value.trim();
+    if (text === (it.thinking || '')) return;
+    try {
+      await api('/api/queue/update', { id: it.id, thinking: text });
+      it.thinking = text;
+    } catch (e) { toast(e.message, true); }
+  };
+  thinking.addEventListener('input', () => { clearTimeout(thinkTimer); thinkTimer = setTimeout(saveThinking, 1200); });
+  thinking.addEventListener('blur', () => { clearTimeout(thinkTimer); saveThinking(); });
   const sentWrap = el('div', { class: 'sent-edit' },
-    el('div', { class: 'take-row' }, el('label', { class: 'sent-label', text: 'What you actually sent' }), el('span', { class: 'spacer' }), xCounter(sent)), sent);
+    el('div', { class: 'take-row' }, el('label', { class: 'sent-label', text: 'What you actually sent' }), el('span', { class: 'spacer' }), xCounter(sent)), sent,
+    el('div', { class: 'take-row' }, el('label', { class: 'sent-label', text: 'How you thought of it' })), thinking);
 
   const drafts = el('div', { class: 'drafts' });
   (it.drafts || []).forEach((d, idx) => {
