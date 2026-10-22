@@ -8,3 +8,4 @@ server/*.log
 
 # private rules never go to git
 routine/*.private.md
+server/keepalive.pid
