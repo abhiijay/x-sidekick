@@ -16,6 +16,10 @@ LOG=keepalive.log
 PORT=$(grep -E '^SIDEKICK_APP_PORT=' .env 2>/dev/null | cut -d= -f2- | tr -d "\"' ")
 PORT=${PORT:-7790}
 URL=$(grep -E '^SIDEKICK_PUBLIC_URL=' .env 2>/dev/null | cut -d= -f2- | tr -d "\"' " | sed 's:/*$::')
+PEER=$(grep -E '^SIDEKICK_PEER_URL=' .env 2>/dev/null | cut -d= -f2- | tr -d "\"' " | sed 's:/*$::')
+# When the public URL is the phone's (the peer), the phone owns the tunnel.
+# Starting ngrok here would take the domain from it, so only keep the server up.
+[ -n "$PEER" ] && [ "$PEER" = "$URL" ] && URL=""
 NGROK=$(command -v ngrok || echo /opt/homebrew/bin/ngrok)
 
 say() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
