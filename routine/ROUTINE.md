@@ -463,6 +463,44 @@ connection that just accepted, or a found X lead).
    [{label, text}]}}`. When a lead's set is there, write those versions from
    these texts word for word, filling only `{first}`, `{product}`,
    `{category}` and `{source}`. They beat the wording in the campaign rules.
+### Fixed first-message format (his rule, 2026-10-28)
+
+Every first message, every campaign and channel, is this text and nothing
+else. Write exactly **one** variant per lead, labelled `Format`. Only the
+slots change per person; every other word stays as written (this beats the
+campaign rules, `templates`, `sent_examples` and the humanizer pass, which
+must not reword it):
+
+```
+Hi {first}, I am reaching out because I found {product} {where}. I figured what I am building can help {product} get more inbound.
+
+My product targets solo/small team SaaS builders with no time to learn and grow organic inbound.
+
+{product} {google_line}, so Supacite.com (my SaaS) can get you {visits}+ visits in 3 months with {guaranteed} guaranteed, measured with your Search Console, or your next 3 months are free.
+
+We did it for our own app first and grew from 1,300 to 25,400 monthly visitors and 3.9x revenue in 4 mo.
+
+Would you have 5 min this week to chat about this?
+```
+
+- `{first}`: first name. `{product}`: product name, as the lead data spells it.
+- `{where}`: where he found them, from `source`: `on Peerlist`, `on Uneed`,
+  `on Fazier`, `on LinkedIn`, or `consistently on my feed` for X leads. Never
+  name a place that is not in the lead data.
+- `{google_line}`: `is still new on Google` when the lead data shows a recent
+  launch (launched in the last ~6 months, or `age_days` under ~180), otherwise
+  `is already on Google`. When the data cannot tell, use the new line and say so
+  in `flag`.
+- `{visits}` / `{guaranteed}`: depend on the size of the product. The only pair
+  he has set is **1000 / 350** for a new or small product. Use it for those.
+  For a product that looks bigger (paid tiers, team, traction, established
+  site), still use 1000 / 350 and put `check visitor numbers for size` in
+  `flag`, until he adds a sizing table here or in the campaign rules. Never
+  invent a bigger guarantee.
+
+The ICP gate in step 3 still runs first: a non-fit gets `not_a_fit`, not this
+message. Follow-ups are not covered by this format.
+
 2. Draft in an Opus subagent (same model rule as replies). Follow the
    campaign's rules to the letter: version labels, length, what may be claimed,
    what must never be claimed. Run the humanizer pass
