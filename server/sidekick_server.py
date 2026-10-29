@@ -2207,7 +2207,7 @@ PRIVATE_SOURCES = {
 }
 # The v2 reply writer and the gold files it reads (approved by the operator 2026-10-22).
 for _name in ("REPLY-WRITER-v2.md", "APPROVED-DRAFTS.md", "VOICE-CARD-abhiijay.md", "VOICE-CARD-avery.md",
-              "VOICE-CARD-arthur.md", "STRONG-REPLIES-BY-TYPE.md", "OVERUSED-PHRASES.md", "PEER-VOICE.md"):
+              "VOICE-CARD-arthur.md", "STRONG-REPLIES-BY-TYPE.md", "OVERUSED-PHRASES.md", "PEER-VOICE.md", "POST-MODELS.md"):
     PRIVATE_SOURCES["knowledge/projects/SupaCite/twitter-format-research/gold/" + _name] = \
         "projects/SupaCite/twitter-format-research/gold/" + _name
 
