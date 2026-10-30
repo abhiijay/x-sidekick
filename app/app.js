@@ -1461,7 +1461,7 @@ function paceGate(ch, mode = modeOf(ch)) {
   // Connect requests past the cap open straight away: the pill already says the cap is reached.
   if (p.capped) return mode === 'connect' ? null : { title: "That's your daily cap. More today raises the spam risk.", go: 'Send anyway' };
   if (p.sessionDone) return { title: 'You planned ' + sessionOf(ch, mode).target + ' for this session and they are done.', go: 'Keep going' };
-  if (p.wait) return { title: 'The next one is due in ' + mmss(p.wait) + '. The random gap keeps this looking human.', go: 'Send early' };
+  // The random gap only shows on the bar ("next in"); it never stops a send (operator, 2026-10-30).
   return null;
 }
 function dmTicker() {
