@@ -50,7 +50,8 @@ const LOCAL_BASE = 'http://127.0.0.1:7790';
 const local = { on: false, checked: 0 };
 function serverBase() {
   if (local.on) return LOCAL_BASE;
-  return (LS.get('server') || location.origin).replace(/\/$/, '');
+  // A pasted app link (…/app/) is the same server: the API lives at its root.
+  return (LS.get('server') || location.origin).replace(/\/+$/, '').replace(/\/app$/, '');
 }
 async function checkLocal() {
   if (Date.now() - local.checked < 300000) return;
