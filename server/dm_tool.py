@@ -5,7 +5,7 @@ The phone app's LinkedIn and X DM tabs read dm-leads.json from the sidekick data
 dir. Nothing else writes new leads there: Claude (in Cowork) builds a batch file
 and runs this. It never sends a message; it only edits JSON files.
 
-  python3 dm_tool.py [--data DIR] load BATCH.json [--allow-repeat] [--messages] [--dry-run]
+  python3 dm_tool.py [--data DIR] load BATCH.json [--account a2] [--allow-repeat] [--messages] [--dry-run]
   python3 dm_tool.py [--data DIR] library LIBRARY.json
   python3 dm_tool.py [--data DIR] export [--since YYYY-MM-DD] [--channel x|linkedin]
                                          [--campaign NAME] [--json]
@@ -48,6 +48,12 @@ One lead:
 A message lead needs variants, a library, or needs_message. Leads already in the file keep their status;
 a lead still waiting to be sent gets its content refreshed. A person already
 messaged on the same channel is never loaded again unless --allow-repeat.
+
+LinkedIn accounts: `sender` (or --account for the whole batch) says which
+account works the person (a1 when missing). A person another account already
+has, in any status, is never loaded, not even with --allow-repeat. For any
+account but a1, nobody on the already-contacted list (dm-touched.json, which
+holds the lead sheet too) is loaded either.
 """
 import argparse
 import json
@@ -249,6 +255,15 @@ def cmd_library(args):
         lib_id, len(lib["hooks"]), len(lib["proofs"]), len(lib["ctas"])))
 
 
+def li_slug(lead):
+    m = re.search(r"linkedin\.com/in/([^/?#\s]+)", str(lead.get("profile_url") or ""), re.I)
+    return m.group(1).lower().rstrip("/").rstrip("-") if m else ""
+
+
+def sender_of(lead):
+    return str(lead.get("sender") or "a1").strip().lower()
+
+
 def cmd_load(args):
     ddir = data_dir(args.data)
     if not os.path.isdir(ddir):
@@ -256,6 +271,17 @@ def cmd_load(args):
     with open(args.file, encoding="utf-8") as f:
         batch = json.load(f)
     incoming = batch if isinstance(batch, list) else batch.get("leads") or []
+    if args.account:
+        code = args.account.strip().lower()
+        if not re.match(r"^[a-z][0-9]{1,2}$", code):
+            sys.exit("--account must look like a1, a2, k1")
+        for lead in incoming:
+            if lead.get("channel") == "linkedin" and not lead.get("sender"):
+                lead["sender"] = code
+    # People contacted before or outside this list (and every lead-sheet row):
+    # off limits for any account but a1, whose own history most of them are.
+    t = load(os.path.join(ddir, "dm-touched.json"), "touched", {}) or {}
+    touched = {str(v).lower().rstrip("/").rstrip("-") for v in (t.get("linkedin") or []) if v}
     new_libs = {} if isinstance(batch, list) else (batch.get("libraries") or {})
 
     libs_path = os.path.join(ddir, "dm-libraries.json")
@@ -273,10 +299,15 @@ def cmd_load(args):
     if errs:
         sys.exit("Nothing loaded. Fix these first:\n  " + "\n  ".join(errs))
 
-    report = {"added": [], "refreshed": [], "kept": [], "repeat": [], "dupe": [], "warn": []}
+    report = {"added": [], "refreshed": [], "kept": [], "repeat": [], "dupe": [], "other": [], "warn": []}
 
     def merge(leads):
         by_id = {l.get("id"): l for l in leads}
+        # Which account has each LinkedIn person, whatever their status.
+        owner = {}
+        for l in leads:
+            if l.get("channel") == "linkedin" and li_slug(l):
+                owner.setdefault(li_slug(l), l)
         contacted = {person_key(l): l for l in leads if l.get("status") in ("sent", "replied")}
         waiting = {person_key(l): l for l in leads if l.get("status") in ("ready", "requested")}
         order = max([l.get("order") or 0 for l in leads] + [0])
@@ -290,6 +321,11 @@ def cmd_load(args):
             for w in warnings_for(dict(src, **lead)):
                 report["warn"].append("%s: %s" % (src["id"], w))
             old = by_id.get(src["id"])
+            if old and old.get("channel") == "linkedin" and src.get("channel") == "linkedin" \
+                    and sender_of(old) != sender_of(dict(old, **{k: v for k, v in src.items() if k == "sender"})):
+                # A batch never moves a person from one account to another.
+                report["other"].append("%s: %s already has them (%s)" % (src["id"], sender_of(old), old.get("status")))
+                continue
             if old:
                 if old.get("status") == "ready":
                     other_kind = (old.get("kind") or "message") != (lead.get("kind") or "message")
@@ -309,6 +345,16 @@ def cmd_load(args):
                     report["kept"].append("%s (%s)" % (src["id"], old.get("status")))
                 continue
             key = person_key(src)
+            if src.get("channel") == "linkedin":
+                slug, who = li_slug(src), sender_of(src)
+                had = owner.get(slug)
+                if had and sender_of(had) != who:
+                    report["other"].append("%s: %s already has them as %s (%s)" % (
+                        src["id"], sender_of(had), had.get("id"), had.get("status")))
+                    continue
+                if who != "a1" and slug in touched and not had:
+                    report["other"].append("%s: already contacted before (on the already-contacted list)" % src["id"])
+                    continue
             if key in contacted and not args.allow_repeat:
                 c = contacted[key]
                 report["repeat"].append("%s: already messaged as %s on %s" % (
@@ -326,6 +372,8 @@ def cmd_load(args):
                     lead[k] = src[k]
             leads.append(lead)
             by_id[lead["id"]] = lead
+            if lead.get("channel") == "linkedin" and li_slug(lead):
+                owner.setdefault(li_slug(lead), lead)
             (waiting if lead["status"] in ("ready", "requested") else contacted)[key] = lead
             report["added"].append(src["id"])
         return report
@@ -340,9 +388,10 @@ def cmd_load(args):
 
     print(("DRY RUN, nothing written. " if args.dry_run else "") +
           "added %d, refreshed %d, left alone %d, skipped as already messaged %d, "
-          "skipped as duplicate %d" % (len(report["added"]), len(report["refreshed"]),
-                                       len(report["kept"]), len(report["repeat"]), len(report["dupe"])))
-    for k, label in (("repeat", "already messaged"), ("dupe", "duplicate"),
+          "skipped as duplicate %d, skipped as taken by the other account %d" % (
+              len(report["added"]), len(report["refreshed"]), len(report["kept"]),
+              len(report["repeat"]), len(report["dupe"]), len(report["other"])))
+    for k, label in (("other", "taken (other account or contacted before)"), ("repeat", "already messaged"), ("dupe", "duplicate"),
                      ("kept", "not touched (already moved on)"), ("warn", "RULE WARNING")):
         for line in report[k]:
             print("  %s: %s" % (label, line))
@@ -498,6 +547,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("load")
     p.add_argument("file")
+    p.add_argument("--account", help="LinkedIn account for every lead without a sender (a1, a2, ...)")
     p.add_argument("--allow-repeat", action="store_true")
     p.add_argument("--messages", action="store_true",
                    help="also replace message versions on accepted connections still waiting to be sent")

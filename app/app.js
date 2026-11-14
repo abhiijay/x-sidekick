@@ -11,6 +11,31 @@ const LS = {
   set(k, v) { try { localStorage.setItem('sk_' + k, v); } catch { /* private mode */ } },
 };
 const ACTIVE = ['created', 'fired', 'working', 'fetching', 'scoring'];
+
+/* Which LinkedIn account this browser works as (a1, a2, ...). Picked once per
+ * browser and remembered, so one browser can stay on one account and the phone
+ * on another. A link ending in ?account=a2 sets it. Empty = the server's own
+ * account. Everyone lives in one people list on the server, so a person one
+ * account has never shows up for the other. */
+const ACCT_RE = /^[a-z][0-9]{1,2}$/;
+function chosenAccount() { const a = LS.get('li_account'); return ACCT_RE.test(a) ? a : ''; }
+function setAccount(code, reload = true) {
+  if (code === chosenAccount()) return;
+  LS.set('li_account', code);
+  // The lists kept on this device belong to the old account.
+  try { Object.keys(localStorage).filter((k) => k.startsWith('sk_cache_')).forEach((k) => localStorage.removeItem(k)); } catch { /* ignore */ }
+  if (reload) location.reload();
+}
+(function accountFromLink() {
+  try {
+    const u = new URL(location.href);
+    if (!u.searchParams.has('account')) return;
+    const a = (u.searchParams.get('account') || '').toLowerCase();
+    if (ACCT_RE.test(a) || a === '') setAccount(a, false);
+    u.searchParams.delete('account');
+    history.replaceState(null, '', u.pathname + (u.searchParams.toString() ? '?' + u.searchParams : '') + u.hash);
+  } catch { /* ignore */ }
+})();
 const state = { items: [], outreach: [], jobs: [], blocked: [], scout: null, seg: 'ready', filter: 'all', picked: new Set(), pollTimer: null,
   lastRefresh: 0, repliesStale: false };
 
@@ -49,6 +74,7 @@ async function api(path, body, etag) {
         'Content-Type': 'application/json',
         'X-Sidekick-Key': LS.get('password'),
         'ngrok-skip-browser-warning': 'true',
+        ...(chosenAccount() ? { 'X-Sidekick-Account': chosenAccount() } : {}),
         ...(etag ? { 'If-None-Match': etag } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -179,6 +205,33 @@ function syncChip(p) {
   c.title = p.error ? p.error + '.' + waiting + ' Your taps are kept and sent when it is back.'
     : 'Same data as your other device, checked ' + agoText(p.last_ok);
   c.onclick = () => toast(c.title, !!p.error);
+}
+
+/* The account badge in the top bar: which LinkedIn account this browser
+ * works as. Tap it to switch. Another account than the server's own tints the
+ * top bar, so the two are never mixed up. */
+function acctChip() {
+  const c = $('acctChip');
+  const want = chosenAccount();
+  const list = dm.accounts || [];
+  const me = list.find((a) => a.code === dm.sender) || { code: dm.sender, label: '' };
+  const other = !!dm.home && dm.sender !== dm.home;
+  // An older server ignores the account and shows its own people.
+  dm.acctWarn = want && dm.sender !== want
+    ? 'This server does not know about accounts yet, so these are ' + dm.sender + "'s people, not " + want
+      + "'s. Do not send from here until the server is updated."
+    : '';
+  document.body.classList.toggle('acct-other', other);
+  document.title = other ? 'Sidekick · ' + (me.label || me.code) : 'Sidekick';
+  c.hidden = !(list.length > 1 || want);
+  if (c.hidden) return;
+  c.textContent = me.label ? me.label + ' · ' + me.code : me.code;
+  c.className = 'acct-chip' + (other ? ' other' : '');
+  c.title = 'LinkedIn account this browser works as. Tap to switch.';
+  c.onclick = () => sheet('Work as which LinkedIn account in this browser?', list.map((a) => ({
+    label: (a.code === dm.sender ? '✓ ' : '') + (a.label ? a.label + ' · ' : '') + a.code + (a.stage === 'new' ? ' (new account)' : ''),
+    run: () => setAccount(a.home ? '' : a.code),
+  })));
 }
 
 function agoText(ts) {
@@ -357,7 +410,8 @@ async function refresh() {
     // A server that syncs with another device leaves Claude's jobs to that one.
     if (!h.routine) warn.push(h.peer && h.peer.on ? 'Find more and Write with Claude run on your other device. What they produce shows up here by itself.' : 'Claude routine is not connected, so drafting is off.');
     if (!h.armory) warn.push('Armory is not connected, so scouting is off.');
-    banner(warn.join(' '));
+    if (dm.acctWarn) warn.unshift(dm.acctWarn);
+    banner(warn.join(' '), !!dm.acctWarn);
     if (ch(q) || ch(j)) {
       if (currentTab() === 'replies') renderReplies();
       else { state.repliesStale = true; $('navBadge').textContent = state.items.filter((i) => i.status === 'drafted').length || ''; }
@@ -1378,6 +1432,9 @@ function takeDm(d) {
   dm.versions = d.versions || {};
   dm.templates = d.templates || {};
   dm.sender = d.sender || 'a1';
+  dm.accounts = d.accounts || [];
+  dm.home = d.home_account || '';
+  acctChip();
   dm.sheetOn = !!d.sheet_on;
   dm.checkOn = d.check_on !== false;
   // A buyer never shows the Non-ICP notes (Try it, Your take, Can I): those
@@ -2266,7 +2323,7 @@ function openFindSheet(which) {
   sheetCustom(ch === 'x' ? 'Find more X leads' : 'Find more people to connect with', [
     dm.checkOn ? null : el('div', { class: 'sheet-note warn', text: "Claude's check is not set up on this sidekick, so Find more will not add anyone. Run python server/set_routine.py on this phone once." }),
     el('div', { class: 'sheet-label', text: 'For' }), campSeg,
-    ch === 'linkedin' ? el('div', { class: 'sheet-label', text: 'From · this sidekick is ' + dm.sender }) : null,
+    ch === 'linkedin' ? el('div', { class: 'sheet-label', text: 'From · working as ' + dm.sender }) : null,
     ch === 'linkedin' ? srcSeg : null,
     el('div', { class: 'sheet-label', text: 'How many' }), grid,
     el('div', { class: 'sheet-row' }, other),

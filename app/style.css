@@ -407,6 +407,12 @@ body.with-actionbar { padding-bottom: calc(var(--tabbar) + 84px + env(safe-area-
 .sync-chip { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
 .sync-chip.ok { color: var(--ok); background: var(--ok-soft); }
 .sync-chip.off { color: var(--warn); background: var(--warn-soft); }
+/* which LinkedIn account this browser works as; another account than the
+ * server's own gets the amber look and an amber line under the top bar */
+.acct-chip { font: inherit; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; border: 0; cursor: pointer;
+  white-space: nowrap; color: var(--accent-text); background: var(--accent-soft); }
+.acct-chip.other { color: var(--warn); background: var(--warn-soft); box-shadow: inset 0 0 0 1.5px var(--warn); }
+body.acct-other .top { box-shadow: inset 0 -3px 0 var(--warn); }
 
 /* on a computer: one centred column, the bars stay under it */
 @media (min-width: 820px) {

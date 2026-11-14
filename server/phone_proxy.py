@@ -37,7 +37,7 @@ def read_env(path):
 ENV = read_env(os.path.join(HERE, ".env"))
 PEER_URL = (os.environ.get("SIDEKICK_PEER_URL") or ENV.get("SIDEKICK_PEER_URL", "")).rstrip("/")
 PORT = int(os.environ.get("SIDEKICK_PROXY_PORT") or ENV.get("SIDEKICK_PROXY_PORT") or 7795)
-PASS_UP = ("X-Sidekick-Key", "Content-Type", "If-None-Match", "Accept-Encoding")
+PASS_UP = ("X-Sidekick-Key", "X-Sidekick-Account", "Content-Type", "If-None-Match", "Accept-Encoding")
 PASS_DOWN = ("Content-Type", "ETag", "Content-Encoding", "Cache-Control")
 
 
@@ -52,7 +52,7 @@ class Proxy(BaseHTTPRequestHandler):
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers",
-                             "Content-Type, X-Sidekick-Key, ngrok-skip-browser-warning, If-None-Match")
+                             "Content-Type, X-Sidekick-Key, X-Sidekick-Account, ngrok-skip-browser-warning, If-None-Match")
             self.send_header("Access-Control-Expose-Headers", "ETag")
             self.send_header("Access-Control-Max-Age", "7200")
 

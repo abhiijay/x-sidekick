@@ -119,6 +119,57 @@ SHEET_SENDER = (env("SIDEKICK_SHEET_SENDER", "a1") or "a1").strip().lower()
 # no history) gets few accepts from big founders, and every request counts
 # against the weekly limit, so Find more only offers people it can reach.
 ACCOUNT_STAGE = "new" if (env("SIDEKICK_ACCOUNT_STAGE", "") or "").strip().lower() == "new" else "established"
+# More than one LinkedIn account on one sidekick. Each browser picks the account
+# it works as (the app sends it as X-Sidekick-Account, remembered per browser),
+# and everyone still lives in one people list, so a person one account has is
+# never offered to another. SIDEKICK_ACCOUNTS="a1:Name, a2:Name:new" names them
+# for the app's switch; names stay in .env, never in this public repo. A code a
+# browser asks for that is not listed still works and counts as a new account.
+ACCOUNT_CODE_RE = re.compile(r"^[a-z][0-9]{1,2}$")
+
+
+def parse_accounts(raw):
+    out = {}
+    for part in (raw or "").split(","):
+        bits = [b.strip() for b in part.split(":")]
+        code = bits[0].lower() if bits else ""
+        if not ACCOUNT_CODE_RE.match(code):
+            continue
+        rest = bits[1:]
+        stage = "new" if any(b.lower() == "new" for b in rest) else "established"
+        label = next((b for b in rest if b and b.lower() not in ("new", "established")), "")
+        out[code] = {"label": label[:40], "stage": stage}
+    if SHEET_SENDER not in out:
+        out = dict([(SHEET_SENDER, {"label": "", "stage": ACCOUNT_STAGE})] + list(out.items()))
+    return out
+
+
+ACCOUNTS = parse_accounts(env("SIDEKICK_ACCOUNTS"))
+REQ = threading.local()
+
+
+def account():
+    """The LinkedIn account this request works as (a1, a2, ...). Background
+    work (the sheet, the acceptance emails) is this device's own account."""
+    return getattr(REQ, "account", None) or SHEET_SENDER
+
+
+def account_stage(code=None):
+    code = code or account()
+    if code in ACCOUNTS:
+        return ACCOUNTS[code]["stage"]
+    return ACCOUNT_STAGE if code == SHEET_SENDER else "new"
+
+
+def request_account(raw):
+    code = str(raw or "").strip().lower()
+    return code if ACCOUNT_CODE_RE.match(code) else None
+
+
+def accounts_list():
+    codes = list(ACCOUNTS) + ([account()] if account() not in ACCOUNTS else [])
+    return [{"code": c, "label": (ACCOUNTS.get(c) or {}).get("label") or "", "stage": account_stage(c),
+             "home": c == SHEET_SENDER} for c in codes]
 if PEER_URL and PEER_URL == PUBLIC_URL:
     # The public URL belongs to the peer, so Claude's callbacks would land there
     # and not here. Find more and Write with Claude stay on the peer.
@@ -751,9 +802,19 @@ def lead_sender(lead):
 
 
 def is_mine(lead):
-    """Each sidekick works one LinkedIn account and shows only its people.
+    """Each browser works one LinkedIn account and shows only its people.
     X leads are not split by account."""
-    return lead.get("channel") != "linkedin" or lead_sender(lead) == SHEET_SENDER
+    return lead.get("channel") != "linkedin" or lead_sender(lead) == account()
+
+
+def acct_state(st):
+    """The part of dm-state.json that belongs to this request's LinkedIn account
+    (its weekly-limit pause and send gap). This device's own account keeps the
+    top level, as before accounts were split; the others live under accounts."""
+    code = account()
+    if code == SHEET_SENDER:
+        return st
+    return st.setdefault("accounts", {}).setdefault(code, {})
 
 
 def dm_stats(leads, state):
@@ -766,7 +827,7 @@ def dm_stats(leads, state):
         mine = [l for l in leads if l.get("channel") == ch]
         sent = sorted((l["sent_ts"] for l in mine if l.get("sent_ts")), reverse=True)
         asked = sorted((l["requested_ts"] for l in mine if l.get("requested_ts")), reverse=True)
-        cool = ((state.get("cooldowns") or {}).get(ch) or {})
+        cool = (((acct_state(state) if ch == "linkedin" else state).get("cooldowns") or {}).get(ch) or {})
         until = cool.get("until") or 0
         out[ch] = {
             "ready": sum(1 for l in mine if l.get("status") == "ready" and lead_kind(l) == "message"),
@@ -783,12 +844,13 @@ def dm_stats(leads, state):
         }
         if ch == "linkedin":
             # LinkedIn's weekly invitation limit, as he reported it on the phone.
-            pause = state.get("connect_pause") or {}
+            acct = acct_state(state)
+            pause = acct.get("connect_pause") or {}
             live = (pause.get("until") or 0) > now
             out[ch].update(connect_pause_until=pause.get("until") if live else None,
                            connect_pause_since=pause.get("ts") if live else None,
                            connect_pause_sent_7d=pause.get("requested_7d") if live else None,
-                           limit_hits=(state.get("limit_hits") or [])[:5])
+                           limit_hits=(acct.get("limit_hits") or [])[:5])
     return out
 
 
@@ -826,7 +888,8 @@ def dm_view():
     return {"leads": shown, "libraries": libs, "stats": dm_stats(leads, load_dm_state()),
             "cooldown_min": DM_COOLDOWN_MIN, "campaigns": camps, "versions": version_stats(leads),
             "templates": load_dm_templates(), "template_slots": list(TEMPLATE_SLOTS),
-            "sender": SHEET_SENDER, "sheet_on": bool(SHEET_URL and SHEET_TOKEN), "account_stage": ACCOUNT_STAGE,
+            "sender": account(), "sheet_on": bool(SHEET_URL and SHEET_TOKEN), "account_stage": account_stage(),
+            "accounts": accounts_list(), "home_account": SHEET_SENDER,
             "check_on": routine_configured() or bool(PEER_URL and ROUTINE_FIRE_URL and ROUTINE_TOKEN)}
 
 
@@ -941,9 +1004,12 @@ def accept_check(trigger="timer"):
         except Exception as e:      # wrong password, no network: shown in the app
             found, checked, mark, err = [], [], aw.get("uid_mark"), "%s: %s" % (type(e).__name__, e)
         with LOCK:
+            # The emails come to this device's own account's inbox, so only its
+            # people can match (a name alike under another account is someone else).
             requested = [{"id": l["id"], "name": l.get("name") or "", "slug": linkedin_slug(l.get("profile_url"))}
                          for l in load_dm_leads()
-                         if l.get("channel") == "linkedin" and lead_kind(l) == "connect" and l.get("status") == "requested"]
+                         if l.get("channel") == "linkedin" and lead_kind(l) == "connect" and l.get("status") == "requested"
+                         and lead_sender(l) == SHEET_SENDER]
         hits = accept_watch.match(found, requested)
         # "X messaged you": a Requested person who writes has accepted; someone in
         # Sent who writes after his message has replied (the email never has the text).
@@ -952,7 +1018,7 @@ def accept_check(trigger="timer"):
         by_slug = {}
         for l in leads_now:
             sl = (linkedin_slug(l.get("profile_url")) or "").lower()
-            if l.get("channel") == "linkedin" and sl:
+            if l.get("channel") == "linkedin" and sl and lead_sender(l) == SHEET_SENDER:
                 by_slug.setdefault(sl, l)
         hit_ids = {h["id"] for h in hits}
         replied = []
@@ -1241,6 +1307,8 @@ def record_dm_send(lead):
                  "batch": lead.get("batch"), "to": lead.get("handle") or lead.get("name"),
                  "product": lead.get("product"), "text": text,
                  "lines": lead.get("sent_lines"), "early": bool(lead.get("sent_early"))}
+        if lead.get("channel") == "linkedin":
+            entry["sender"] = lead_sender(lead)
         if isinstance(lead.get("sent_verbatim"), bool):
             entry["verbatim"] = lead["sent_verbatim"]
         if lead.get("status") == "replied":
@@ -1418,8 +1486,8 @@ def dm_failed(body):
     minutes = max(5, min(minutes, 24 * 60))
     with LOCK:
         st = load_dm_state()
-        st.setdefault("cooldowns", {})[ch] = {"ts": now_str(), "until": time.time() + minutes * 60,
-                                              "lead_id": str(body.get("id") or "")[:40]}
+        (acct_state(st) if ch == "linkedin" else st).setdefault("cooldowns", {})[ch] = {
+            "ts": now_str(), "until": time.time() + minutes * 60, "lead_id": str(body.get("id") or "")[:40]}
         fails = st.setdefault("failures", [])
         fails.insert(0, {"ts": now_str(), "channel": ch, "lead_id": str(body.get("id") or "")[:40]})
         st["failures"] = fails[:200]
@@ -1490,12 +1558,13 @@ def start_find_job(body):
     if running:
         return 409, {"error": "a Find more run is already going", "job": public_job(running)}
     job, token = create_job("leadfind", {"campaign": campaign, "channel": channel,
-                                         "want": want, "days": days, "source": source})
+                                         "want": want, "days": days, "source": source,
+                                         "account": account()})
     with LOCK:
         runs = load_find_runs()
         runs.insert(0, {"id": "find_" + uuid.uuid4().hex[:8], "job_id": job["id"], "ts": now_str(),
                         "campaign": campaign, "channel": channel, "want": want, "days": days,
-                        "source": source, "sender": SHEET_SENDER, "candidates": [], "added": [], "report": None})
+                        "source": source, "sender": account(), "candidates": [], "added": [], "report": None})
         save_find_runs(runs)
     threading.Thread(target=run_find_stage1, args=(job["id"], token), daemon=True).start()
     return 200, {"ok": True, "job": public_job(get_job(job["id"]))}
@@ -1506,6 +1575,7 @@ def run_find_stage1(job_id, token):
         import lead_finder
         job = get_job(job_id)
         p = job["payload"]
+        REQ.account = request_account(p.get("account"))    # this thread works as that account
         camp = load_dm_campaigns().get(p["campaign"], {})
         find_cfg = camp.get("find") or {}
         keys, names = touched_keys()
@@ -1658,7 +1728,7 @@ def find_add_unchecked(body):
 
 
 def find_status():
-    runs = load_find_runs()
+    runs = [r for r in load_find_runs() if (r.get("sender") or "a1") == account()]
     run = dict(runs[0]) if runs else None
     job = get_job(run["job_id"]) if run else None
     if run:
@@ -1696,7 +1766,7 @@ def start_write_job(body):
     with LOCK:
         leads = load_dm_leads()
         todo = [l for l in leads if l.get("status") == "ready" and lead_kind(l) == "message"
-                and l.get("needs_message") and l.get("writing_job") not in live
+                and l.get("needs_message") and l.get("writing_job") not in live and is_mine(l)
                 and (not ids or l.get("id") in ids)
                 and (not body.get("channel") or l.get("channel") == body.get("channel"))]
         if not todo:
@@ -1870,6 +1940,8 @@ def dm_payload_for_write(job):
     for l in load_dm_leads():
         if l.get("id") in ids:
             row = {k: l[k] for k in keep if l.get(k)}
+            if l.get("channel") == "linkedin":
+                row["sender"] = lead_sender(l)      # which LinkedIn account sends it
             # Tells the routine a report PDF is already on the card.
             row["has_report"] = any("report" in str(a.get("label") or a.get("file") or "").lower()
                                     for a in l.get("attachments") or [])
@@ -1887,8 +1959,12 @@ def dm_payload_for_write(job):
             "leads": leads,
             "campaigns": {c: camps[c] for c in used if c in camps},
             "sent_examples": [{"channel": s.get("channel"), "campaign": s.get("campaign"),
+                               "sender": s.get("sender") or ("a1" if s.get("channel") == "linkedin" else None),
                                "text": s.get("text"), "replied": bool(s.get("replied")),
                                "edited_by_him": s.get("verbatim") is False} for s in examples],
+            # Who each LinkedIn account is (names from .env). A message goes out
+            # in its sender's name; never in another account's name or story.
+            "accounts": {a["code"]: {"label": a["label"], "home": a["home"]} for a in accounts_list()},
             # His "Tell Claude" notes, newest first: standing rules for these campaigns.
             "feedback": [{k: n.get(k) for k in ("ts", "text", "campaign", "lead", "message") if n.get(k)}
                          for n in load_dm_feedback()
@@ -2008,14 +2084,15 @@ def dm_connect_pause(body):
     days = clamp_int(body.get("days"), 0, 14, 7)
     with LOCK:
         st = load_dm_state()
+        acct = acct_state(st)
         if days:
             sent7 = dm_stats(load_dm_leads(), st)["linkedin"]["requested_7d"]
-            st["connect_pause"] = {"ts": now_str(), "until": time.time() + days * 86400, "requested_7d": sent7}
-            hits = st.setdefault("limit_hits", [])
+            acct["connect_pause"] = {"ts": now_str(), "until": time.time() + days * 86400, "requested_7d": sent7}
+            hits = acct.setdefault("limit_hits", [])
             hits.insert(0, {"ts": now_str(), "requested_7d": sent7, "days": days})
-            st["limit_hits"] = hits[:50]
+            acct["limit_hits"] = hits[:50]
         else:
-            st.pop("connect_pause", None)
+            acct.pop("connect_pause", None)
         save_dm_state(st)
         stats = dm_stats(load_dm_leads(), st)
     return 200, {"ok": True, "stats": stats}
@@ -2027,7 +2104,7 @@ def dm_cooldown_clear(body):
         return 400, {"error": "channel must be linkedin or x"}
     with LOCK:
         st = load_dm_state()
-        (st.get("cooldowns") or {}).pop(ch, None)
+        ((acct_state(st) if ch == "linkedin" else st).get("cooldowns") or {}).pop(ch, None)
         save_dm_state(st)
         stats = dm_stats(load_dm_leads(), st)
     return 200, {"ok": True, "stats": stats}
@@ -2518,6 +2595,55 @@ def peer_call(path, body=None, timeout=30, tries=3):
     raise last
 
 
+def on_peer():
+    """This device cannot start Claude runs (its public URL is the other one's),
+    so Find more and Write with Claude are asked of the other device."""
+    return bool(PEER_URL) and not routine_configured()
+
+
+def via_peer(method, path, body=None):
+    """Start Find more or Write with Claude on the other device, as this
+    request's LinkedIn account. What it adds comes back here on the next sync.
+    For another account than its own, the other device must know accounts:
+    an older one would quietly work as its own account instead."""
+    acct = getattr(REQ, "account", None)
+
+    def ask(m, pth, b=None):
+        headers = {"X-Sidekick-Key": PEER_PASSWORD, "ngrok-skip-browser-warning": "1",
+                   "Content-Type": "application/json", "User-Agent": "sidekick-sync"}
+        if acct:
+            headers["X-Sidekick-Account"] = acct
+        req = urllib.request.Request(PEER_URL + pth, method=m, headers=headers,
+                                     data=json.dumps(b or {}).encode("utf-8") if m == "POST" else None)
+        try:
+            with urllib.request.urlopen(req, timeout=90) as r:
+                code, raw = r.status, r.read()
+        except urllib.error.HTTPError as e:
+            code, raw = e.code, e.read()
+        try:
+            out = json.loads(raw.decode("utf-8"))
+        except ValueError:
+            out = {"error": "the other device is offline" if b"ngrok" in raw.lower() else
+                   "the other device answered %d" % code}
+        if code == 401:
+            out = {"error": "the other device refused the password"}
+        return code, out if isinstance(out, dict) else {"data": out}
+
+    try:
+        if acct and acct != SHEET_SENDER:
+            code, h = ask("GET", "/api/health")
+            if code == 200 and h.get("li_account") != acct:
+                return 409, {"error": "Your phone runs an older Sidekick that does not know about accounts, so it "
+                                      "would work as %s. Update it (open Termux and run sidekick), then try again."
+                                      % SHEET_SENDER}
+        code, out = ask(method, path, body)
+    except Exception as e:
+        return 502, {"error": "Could not reach your phone, which runs Find more and Write with Claude (%s)."
+                              % type(e).__name__}
+    PEER_WAKE.set()
+    return code, out
+
+
 def peer_sync_once():
     theirs = peer_call("/api/sync/digest")
     mine = sync_digest()
@@ -2722,7 +2848,7 @@ def sheet_pool(touched, want):
         rev = re.sub(r"[^0-9.]", "", str(p.get("revenue") or ""))
         rev = float(rev) if rev else None
         pts = 9 if rev and rev >= 500 else 7
-        if ACCOUNT_STAGE == "new":
+        if account_stage() == "new":
             pts = 8 if rev and 500 <= rev < 5000 else 7
         maker = str(p.get("founder") or "").strip()
         out.append({"source": "Lead sheet", "product": p.get("company") or "", "site": p.get("website") or "",
@@ -2733,11 +2859,11 @@ def sheet_pool(touched, want):
                     "tier": "Contact this week" if pts >= 8 else "Next batch", "key": key,
                     "sheet_id": p.get("sheet_id") or "", "notes": str(p.get("notes") or "")[:200], "prices": [],
                     "revenue_usd": rev})
-        if ACCOUNT_STAGE != "new" and len(out) >= want * 2:
+        if account_stage() != "new" and len(out) >= want * 2:
             break
     out, dropped = fit_for_account(out, want * 2)
     note = "Lead sheet: %d free, %d taken for this run" % (len(pool), min(len(out), want * 2))
-    if ACCOUNT_STAGE == "new":
+    if account_stage() == "new":
         note += ", %d left out as too big for a new account" % dropped
     return out[:want * 2], note
 
@@ -2774,7 +2900,7 @@ def reach_of(c):
 def fit_for_account(cands, want):
     """A new account: drop the big names, small founders first, a few stretches.
     An established account keeps the order it had."""
-    if ACCOUNT_STAGE != "new":
+    if account_stage() != "new":
         return cands, 0
     good, stretch, dropped = [], [], 0
     for c in cands:
@@ -3910,12 +4036,14 @@ def agent_job_payload(job):
         return {"job_id": job["id"], "kind": "leadfind", "campaign": job["payload"].get("campaign"),
                 "channel": job["payload"].get("channel"), "want": job["payload"].get("want"),
                 "rules": camp, "candidates": run.get("candidates") or [],
-                "account": {"sender": run.get("sender") or SHEET_SENDER, "stage": ACCOUNT_STAGE,
+                "account": {"sender": run.get("sender") or SHEET_SENDER,
+                            "stage": account_stage(run.get("sender") or SHEET_SENDER),
                             "note": ("This LinkedIn account is new: few connections, no history. Keep only founders "
                                      "likely to accept a stranger: solo or small-team founders, indie and early "
                                      "products, under about $20k a month, not famous, not VC-backed, not big-audience "
                                      "creators. Drop anyone who rarely accepts cold requests; a wasted request "
-                                     "costs one of the few allowed each week.") if ACCOUNT_STAGE == "new" else ""},
+                                     "costs one of the few allowed each week.")
+                            if account_stage(run.get("sender") or SHEET_SENDER) == "new" else ""},
                 "write_to": "/agent/job/%s/leads" % job["id"]}
     run = next((r for r in load_scout_runs() if r["job_id"] == job["id"]), None)
     return {"job_id": job["id"], "kind": "scout",
@@ -4173,7 +4301,7 @@ class BaseHandler(BaseHTTPRequestHandler):
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers",
-                             "Content-Type, X-Sidekick-Key, ngrok-skip-browser-warning, If-None-Match")
+                             "Content-Type, X-Sidekick-Key, X-Sidekick-Account, ngrok-skip-browser-warning, If-None-Match")
             # The app only starts sending If-None-Match once it can read an ETag,
             # so a phone on a newer app never breaks against an older server.
             self.send_header("Access-Control-Expose-Headers", "ETag")
@@ -4341,6 +4469,7 @@ class AppHandler(BaseHandler):
         if not check_app_key(self):
             time.sleep(0.5)
             return self._json(401, {"error": "wrong or missing password"})
+        REQ.account = request_account(self.headers.get("X-Sidekick-Account"))
         body = self._body() if method == "POST" else None
         if method == "POST" and body is None and path not in ("/api/queue/clear-done", "/api/scout", "/api/mentions/check"):
             return self._json(400, {"error": "json body required"})
@@ -4361,6 +4490,7 @@ class AppHandler(BaseHandler):
                              rejects=len(_load(REJECTS_FILE, "rejects")),
                              reply_notes=len(_load(REPLY_FEEDBACK_FILE, "notes")),
                              dm=True, dm_ready={ch: dm[ch]["ready"] for ch in DM_CHANNELS},
+                             li_account=account(),
                              # Here, not in /api/dm: its clock ticks every check, and
                              # that would defeat the 304s on the big DM list.
                              accept_watch=accept_status(), peer=dict(PEER_STATUS), sheet=dict(SHEET_STATUS))
@@ -4409,6 +4539,10 @@ class AppHandler(BaseHandler):
                     with LOCK:
                         return self._json(200, dm_view())
                 if path == "/api/leads/find":
+                    if on_peer():
+                        code, out = via_peer("GET", path)
+                        if code == 200:
+                            return self._json(200, out)
                     with LOCK:
                         return self._json(200, find_status())
                 if path == "/api/queue":
@@ -4487,6 +4621,9 @@ class AppHandler(BaseHandler):
                 return self._json(*start_draft_job(ids, body.get("account"), str(body.get("note") or "")))
             if path == "/api/scout":
                 return self._json(*start_scout_job(body.get("want")))
+            if path in ("/api/leads/find", "/api/leads/find/add-unchecked", "/api/dm/write", "/api/dm/followup") \
+                    and on_peer():
+                return self._json(*via_peer("POST", path, body))
             if path == "/api/leads/find":
                 return self._json(*start_find_job(body))
             if path == "/api/leads/find/add-unchecked":
@@ -4535,6 +4672,7 @@ class AppHandler(BaseHandler):
 
     # ---- Claude callbacks (per-job token)
     def _agent(self, method, path):
+        REQ.account = None      # Claude's calls work from the job's own account, never a leftover
         m = re.match(r"^/agent/job/(job_[a-f0-9]{10})(?:/(drafts|scout|leads|dmwrite|ask|done|rules|file))?$", path)
         am = re.match(r"^/agent/armory/(job_[a-f0-9]{10})(/twitter/[a-z/]+)$", path)
         job_id = (m or am).group(1) if (m or am) else None

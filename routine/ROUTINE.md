@@ -463,6 +463,13 @@ connection that just accepted, or a found X lead).
    [{label, text}]}}`. When a lead's set is there, write those versions from
    these texts word for word, filling only `{first}`, `{product}`,
    `{category}` and `{source}`. They beat the wording in the campaign rules.
+   **LinkedIn accounts.** Each LinkedIn lead has `sender` (a1, a2, ...), the
+   account that sends it; `accounts` gives each one's name (`label`). Write
+   every message as that person: sign and speak in their name, and never use
+   another account's name, age, story or history. `sent_examples` carry
+   `sender` too: examples from another account show the shape that gets
+   replies, not who is speaking. When a sender has no name in `accounts`, sign
+   with no name and flag it.
 2. Draft in an Opus subagent (same model rule as replies). Follow the
    campaign's rules to the letter: version labels, length, what may be claimed,
    what must never be claimed. Run the humanizer pass
