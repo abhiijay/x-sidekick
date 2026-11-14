@@ -4267,6 +4267,10 @@ def check_app_key(handler):
     supplied = handler.headers.get("X-Sidekick-Key", "")
     if supplied and hmac.compare_digest(supplied.encode(), APP_PASSWORD.encode()):
         return True
+    if not supplied:
+        # No password at all is not a guess: keepalive's "is it up?" check
+        # every 30s used to count, and locked this computer out of its own server.
+        return False
     recent.append(time.time())
     _fails[cid] = recent
     return False
