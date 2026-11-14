@@ -65,7 +65,9 @@ def load_dotenv(path):
             os.environ.setdefault(k.strip(), v)
 
 
-load_dotenv(os.path.join(HERE, ".env"))
+# A second sidekick on the same computer (another LinkedIn account) runs the
+# same code with its own settings file: SIDEKICK_ENV_FILE=.env.a2 ./start.sh
+load_dotenv(os.path.join(HERE, os.environ.get("SIDEKICK_ENV_FILE") or ".env"))
 
 
 def env(name, default=""):

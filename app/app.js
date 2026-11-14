@@ -222,8 +222,8 @@ function acctChip() {
       + "'s. Do not send from here until the server is updated."
     : '';
   document.body.classList.toggle('acct-other', other);
-  document.title = other ? 'Sidekick · ' + (me.label || me.code) : 'Sidekick';
-  c.hidden = !(list.length > 1 || want);
+  document.title = other || me.label ? 'Sidekick · ' + (me.label || me.code) : 'Sidekick';
+  c.hidden = !(list.length > 1 || want || me.label);
   if (c.hidden) return;
   c.textContent = me.label ? me.label + ' · ' + me.code : me.code;
   c.className = 'acct-chip' + (other ? ' other' : '');

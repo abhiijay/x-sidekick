@@ -10,13 +10,22 @@
 # Start from Terminal, not a LaunchAgent (LaunchAgents cannot read ~/Documents):
 #   ./start-sidekick.command      or      nohup ./keepalive.sh >/dev/null 2>&1 &
 # Log: keepalive.log next to this file.
+#
+# A second sidekick on this computer (another LinkedIn account) has its own
+# settings file: ./keepalive.sh .env.a2  keeps that one up, with its own log,
+# pid file and ngrok (SIDEKICK_NGROK_CONFIG names its ngrok account's config).
 
 cd "$(dirname "$0")" || exit 1
-LOG=keepalive.log
-PORT=$(grep -E '^SIDEKICK_APP_PORT=' .env 2>/dev/null | cut -d= -f2- | tr -d "\"' ")
+ENVF=${1:-.env}
+[ -f "$ENVF" ] || { echo "no settings file $ENVF"; exit 1; }
+TAG=$(echo "$ENVF" | sed -n 's/^\.env\.\(.*\)$/-\1/p')
+LOG=keepalive$TAG.log
+setting() { grep -E "^$1=" "$ENVF" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"' "; }
+PORT=$(setting SIDEKICK_APP_PORT)
 PORT=${PORT:-7790}
-URL=$(grep -E '^SIDEKICK_PUBLIC_URL=' .env 2>/dev/null | cut -d= -f2- | tr -d "\"' " | sed 's:/*$::')
-PEER=$(grep -E '^SIDEKICK_PEER_URL=' .env 2>/dev/null | cut -d= -f2- | tr -d "\"' " | sed 's:/*$::')
+URL=$(setting SIDEKICK_PUBLIC_URL | sed 's:/*$::')
+PEER=$(setting SIDEKICK_PEER_URL | sed 's:/*$::')
+NGROK_CONFIG=$(setting SIDEKICK_NGROK_CONFIG)
 # When the public URL is the phone's (the peer), the phone owns the tunnel.
 # Starting ngrok here would take the domain from it, so only keep the server up.
 [ -n "$PEER" ] && [ "$PEER" = "$URL" ] && URL=""
@@ -25,7 +34,8 @@ NGROK=$(command -v ngrok || echo /opt/homebrew/bin/ngrok)
 say() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
 
 # One copy only.
-PIDFILE=keepalive.pid
+PIDFILE=keepalive$TAG.pid
+NGROK_PID=ngrok$TAG.pid
 if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     echo "keepalive already running (pid $(cat "$PIDFILE"))"
     exit 0
@@ -42,9 +52,19 @@ code() { curl -s -m 8 -o /dev/null -w '%{http_code}' -H 'ngrok-skip-browser-warn
 
 start_ngrok() {
     [ -n "$URL" ] || return
-    pkill -x ngrok 2>/dev/null
+    # Only this sidekick's own ngrok: another one on this computer keeps running.
+    if [ -n "$TAG" ]; then
+        [ -f "$NGROK_PID" ] && kill "$(cat "$NGROK_PID")" 2>/dev/null
+    else
+        pkill -x ngrok 2>/dev/null
+    fi
     sleep 2
-    nohup "$NGROK" http --url="$URL" "$PORT" --log=stdout >> ngrok.log 2>&1 &
+    if [ -n "$NGROK_CONFIG" ]; then
+        nohup "$NGROK" http --url="$URL" "$PORT" --config="$NGROK_CONFIG" --log=stdout >> ngrok$TAG.log 2>&1 &
+    else
+        nohup "$NGROK" http --url="$URL" "$PORT" --log=stdout >> ngrok$TAG.log 2>&1 &
+    fi
+    echo $! > "$NGROK_PID"
     say "ngrok started on $URL"
 }
 
@@ -56,7 +76,7 @@ while true; do
         # Two misses in a row, so a slow request is not mistaken for a crash.
         if [ "$down_for" -ge 2 ]; then
             say "server not answering, starting it"
-            nohup ./start.sh >> sidekick.log 2>&1 &
+            SIDEKICK_ENV_FILE="$ENVF" nohup ./start.sh >> sidekick$TAG.log 2>&1 &
             down_for=0
             sleep 10
         fi

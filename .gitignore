@@ -1,5 +1,8 @@
 # secrets and live data never go to git
 server/.env
+server/.env.*
+server/ngrok-*.yml
+server/*.pid
 server/data/
 *.corrupt-*
 *.tmp
