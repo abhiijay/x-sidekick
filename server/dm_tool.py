@@ -5,7 +5,7 @@ The phone app's LinkedIn and X DM tabs read dm-leads.json from the sidekick data
 dir. Nothing else writes new leads there: Claude (in Cowork) builds a batch file
 and runs this. It never sends a message; it only edits JSON files.
 
-  python3 dm_tool.py [--data DIR] load BATCH.json [--account a2] [--allow-repeat] [--messages] [--dry-run]
+  python3 dm_tool.py [--data DIR] load BATCH.json [--account a2] [--free-sheet-rows] [--allow-repeat] [--messages] [--dry-run]
   python3 dm_tool.py [--data DIR] library LIBRARY.json
   python3 dm_tool.py [--data DIR] export [--since YYYY-MM-DD] [--channel x|linkedin]
                                          [--campaign NAME] [--json]
@@ -53,7 +53,10 @@ LinkedIn accounts: `sender` (or --account for the whole batch) says which
 account works the person (a1 when missing). A person another account already
 has, in any status, is never loaded, not even with --allow-repeat. For any
 account but a1, nobody on the already-contacted list (dm-touched.json, which
-holds the lead sheet too) is loaded either.
+holds the lead sheet too) is loaded either. --free-sheet-rows: the batch
+is untaken lead-sheet rows (empty Sender), each lead carrying its sheet_id;
+for those only people already in a sidekick count as taken, as in Find
+more's Spreadsheet source. Check the rest of the sheet for the same person first.
 """
 import argparse
 import json
@@ -352,7 +355,10 @@ def cmd_load(args):
                     report["other"].append("%s: %s already has them as %s (%s)" % (
                         src["id"], sender_of(had), had.get("id"), had.get("status")))
                     continue
-                if who != "a1" and slug in touched and not had:
+                # The touched list holds every sheet row, untaken ones too, so a
+                # batch of free sheet rows is judged by the sidekicks alone.
+                free_row = args.free_sheet_rows and bool(src.get("sheet_id"))
+                if who != "a1" and slug in touched and not had and not free_row:
                     report["other"].append("%s: already contacted before (on the already-contacted list)" % src["id"])
                     continue
             if key in contacted and not args.allow_repeat:
@@ -548,6 +554,8 @@ def main():
     p = sub.add_parser("load")
     p.add_argument("file")
     p.add_argument("--account", help="LinkedIn account for every lead without a sender (a1, a2, ...)")
+    p.add_argument("--free-sheet-rows", action="store_true",
+                   help="leads are untaken lead-sheet rows (with sheet_id): skip the already-contacted list for them")
     p.add_argument("--allow-repeat", action="store_true")
     p.add_argument("--messages", action="store_true",
                    help="also replace message versions on accepted connections still waiting to be sent")
