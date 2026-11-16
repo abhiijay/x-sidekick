@@ -1619,7 +1619,8 @@ def run_find_stage1(job_id, token):
         update_find_run(job_id, candidates=cands, stage1=report)
         if not cands:
             want_txt = sheet_filter_text(find_cfg.get("sheet"))
-            why = (("Nobody left in the lead sheet who matches this campaign (%s). Ask Claude in Cowork to research "
+            stale = source == "sheet" and SHEET_SCRIPT_OLD in sheet_note    # the note says what to do
+            why = "" if stale else (("Nobody left in the lead sheet who matches this campaign (%s). Ask Claude in Cowork to research "
                     "more of them into the sheet. " % want_txt) if source == "sheet" and want_txt else
                    "Nobody free in the lead sheet. Try Third-party apps, or ask Claude in Cowork to research more people into the sheet. "
                    if source == "sheet" else "Nothing new passed the checks. ")
@@ -2925,6 +2926,9 @@ def sheet_filter_text(cfg):
     return who if srcs else ""
 
 
+SHEET_SCRIPT_OLD = "its script is older than this sidekick"
+
+
 def sheet_pool(touched, want, cfg=None, turned=()):
     """People in the lead sheet nobody has taken yet (empty Sender in LinkedIn
     Outreach, or founders on the Leads tab not in it), as Find more
@@ -2942,9 +2946,9 @@ def sheet_pool(touched, want, cfg=None, turned=()):
     pool = got.get("pool") or []
     srcs, lo, hi = sheet_filter(cfg)
     if (srcs or lo is not None or hi is not None) and int(got.get("v") or 1) < 2:
-        return [], ("Lead sheet: its script is older than this sidekick and does not send revenue or source, so it "
+        return [], ("Lead sheet: %s and does not send revenue or source, so it "
                     "cannot pick out %s. Paste sheet/Code.gs into the sheet's Apps Script, then Deploy > Manage "
-                    "deployments > edit > New version." % sheet_filter_text(cfg))
+                    "deployments > edit > New version." % (SHEET_SCRIPT_OLD, sheet_filter_text(cfg)))
     turned = set(turned or ())
     out, skip = [], {"taken": 0, "turned": 0, "source": 0, "revenue": 0}
     for p in pool:
