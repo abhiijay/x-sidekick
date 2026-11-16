@@ -748,6 +748,7 @@ DM_TEMPLATES_FILE = os.path.join(DATA_DIR, "dm-templates.json")
 # "Find more" never brings back someone who was already connected or messaged.
 DM_TOUCHED_FILE = os.path.join(DATA_DIR, "dm-touched.json")
 FIND_RUNS_FILE = os.path.join(DATA_DIR, "find-runs.json")
+FIND_DROPS_FILE = os.path.join(DATA_DIR, "find-turned-down.json")
 # "Tell Claude" notes from the phone: what to change in the messages it writes.
 # Every Write with Claude run reads the newest ones as standing rules, the same
 # way rejected-drafts.json works for replies.
@@ -885,7 +886,8 @@ def dm_view():
             l["claude_url"] = url
     wanted = {l.get("library") for l in shown if l.get("library")}
     libs = {k: v for k, v in load_dm_libraries().items() if k in wanted}
-    camps = {k: {"label": v.get("label") or k, "channels": v.get("channels") or list(DM_CHANNELS)}
+    camps = {k: {"label": v.get("label") or k, "channels": v.get("channels") or list(DM_CHANNELS),
+                 "sheet_filter": sheet_filter_text((v.get("find") or {}).get("sheet"))}
              for k, v in load_dm_campaigns().items()}
     return {"leads": shown, "libraries": libs, "stats": dm_stats(leads, load_dm_state()),
             "cooldown_min": DM_COOLDOWN_MIN, "campaigns": camps, "versions": version_stats(leads),
@@ -1581,6 +1583,8 @@ def run_find_stage1(job_id, token):
         camp = load_dm_campaigns().get(p["campaign"], {})
         find_cfg = camp.get("find") or {}
         keys, names = touched_keys()
+        # People Claude turned down under these same rules are not offered again.
+        turned = turned_down(p["campaign"], p.get("account"))
         update_job(job_id, status="fetching", progress="starting")
         # Spreadsheet: only people in the lead sheet nobody has taken. Third-party
         # apps: only fresh launches; whoever is added goes into the sheet as a
@@ -1592,14 +1596,14 @@ def run_find_stage1(job_id, token):
             try:
                 # Only people already in a sidekick count as taken here: the
                 # touched list also holds every sheet row, free ones included.
-                sheet_cands, sheet_note = sheet_pool(lead_keys(), p["want"])
+                sheet_cands, sheet_note = sheet_pool(lead_keys(), p["want"], find_cfg.get("sheet"), turned)
             except Exception as e:
                 sheet_note = "Lead sheet: %s" % str(e)[:120]
         rest = 0 if source == "sheet" else p["want"]
         cands, report = ([], {"sources": {}, "errors": [], "stopped": None}) if rest == 0 else lead_finder.find(
             need="linkedin" if p["channel"] == "linkedin" else "x", want=rest,
             days=max(p["days"], clamp_int(find_cfg.get("days"), 3, 60, p["days"])),   # a campaign may look further back
-            touched=keys, touched_names=names,
+            touched=keys | turned, touched_names=names,
             exclude_keywords=find_cfg.get("exclude_keywords") or (),
             require_no_video=bool(find_cfg.get("require_no_video", True)),
             require_pricing=bool(find_cfg.get("require_pricing", True)),
@@ -1614,7 +1618,10 @@ def run_find_stage1(job_id, token):
             report["sheet"] = sheet_note
         update_find_run(job_id, candidates=cands, stage1=report)
         if not cands:
-            why = ("Nobody free in the lead sheet. Try Third-party apps, or ask Claude in Cowork to research more people into the sheet. "
+            want_txt = sheet_filter_text(find_cfg.get("sheet"))
+            why = (("Nobody left in the lead sheet who matches this campaign (%s). Ask Claude in Cowork to research "
+                    "more of them into the sheet. " % want_txt) if source == "sheet" and want_txt else
+                   "Nobody free in the lead sheet. Try Third-party apps, or ask Claude in Cowork to research more people into the sheet. "
                    if source == "sheet" else "Nothing new passed the checks. ")
             update_job(job_id, status="done", report=why + find_summary(report))
             return
@@ -1713,7 +1720,51 @@ def agent_write_leads(job, body):
     n = add_found_leads(job["id"], keep)
     drops = [d for d in (body.get("drop") or []) if isinstance(d, dict)][:200]
     update_find_run(job["id"], dropped=drops, report=str(body.get("report") or "")[:2000])
+    run = next((r for r in load_find_runs() if r.get("job_id") == job["id"]), None) or {}
+    kept = {str(k.get("key")) for k in keep}
+    remember_turned_down(run.get("campaign") or job["payload"].get("campaign"), run.get("sender"),
+                         [d for d in drops if str(d.get("key")) not in kept],
+                         {c.get("key") for c in run.get("candidates") or []})
     return 200, {"ok": True, "added": n}
+
+
+# People Claude turned down in Find more, per campaign and LinkedIn account, so
+# the same rows are not offered (and judged, and dropped) on every run. A drop
+# only counts under the rules it was made under: change the campaign's rules and
+# everyone is judged again.
+FIND_DROPS_MAX = 5000
+
+
+def rules_sig(campaign):
+    camp = load_dm_campaigns().get(campaign) or {}
+    return hashlib.sha1(str(camp.get("rules") or "").encode("utf-8")).hexdigest()[:12]
+
+
+def turned_down(campaign, acct=None):
+    d = _load(FIND_DROPS_FILE, "drops")
+    bucket = (d if isinstance(d, dict) else {}).get("%s|%s" % (campaign, acct or SHEET_SENDER)) or {}
+    sig = rules_sig(campaign)
+    return {k for k, v in bucket.items() if isinstance(v, dict) and v.get("rules") == sig}
+
+
+def remember_turned_down(campaign, acct, drops, cand_keys):
+    if not campaign or not drops:
+        return 0
+    sig, stamp, n = rules_sig(campaign), now_str(), 0
+    with LOCK:
+        d = _load(FIND_DROPS_FILE, "drops")
+        d = d if isinstance(d, dict) else {}
+        bucket = d.setdefault("%s|%s" % (campaign, acct or SHEET_SENDER), {})
+        for x in drops:
+            k = str(x.get("key") or "")
+            if k and k in cand_keys:
+                bucket[k] = {"why": str(x.get("why") or "")[:200], "ts": stamp, "rules": sig}
+                n += 1
+        if len(bucket) > FIND_DROPS_MAX:
+            newest = sorted(bucket.items(), key=lambda kv: str(kv[1].get("ts") or ""), reverse=True)
+            d["%s|%s" % (campaign, acct or SHEET_SENDER)] = dict(newest[:FIND_DROPS_MAX])
+        _save(FIND_DROPS_FILE, d, "drops")
+    return n
 
 
 def find_add_unchecked(body):
@@ -2834,37 +2885,112 @@ def sheet_sync_once():
     return pushed
 
 
-def sheet_pool(touched, want):
+def money_first(text):
+    """The first money figure in a revenue cell: "$1,528 MRR ($13,528 last 30
+    days)" -> 1528, "12000" -> 12000, "Unknown" -> None. The first figure is the
+    MRR when there is one, which is what the campaign band is about."""
+    s = str(text or "")
+    m = re.search(r"\$\s?([\d,]+(?:\.\d+)?)", s) or re.match(r"\s*([\d,]+(?:\.\d+)?)\s*$", s)
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def sheet_filter(cfg):
+    """A campaign's `find.sheet` block -> (sources, low, high). Sources match the
+    sheet's Source or Group column, any case ("trustmrr"). Low/high are dollars
+    a month; a row with no revenue on file never passes a band."""
+    cfg = cfg if isinstance(cfg, dict) else {}
+    srcs = [str(s).strip().lower() for s in cfg.get("sources") or [] if str(s).strip()]
+    lo, hi = cfg.get("min_revenue"), cfg.get("max_revenue")
+    lo = float(lo) if isinstance(lo, (int, float)) and not isinstance(lo, bool) else None
+    hi = float(hi) if isinstance(hi, (int, float)) and not isinstance(hi, bool) else None
+    return srcs, lo, hi
+
+
+def sheet_filter_text(cfg):
+    """"TrustMRR founders at $1,000 to $20,000 a month", or "" with no filter."""
+    srcs, lo, hi = sheet_filter(cfg)
+    who = " or ".join(str(s) for s in (cfg or {}).get("sources") or [] if str(s).strip())
+    who = (who + " founders") if who else "people"
+    if lo is not None and hi is not None:
+        return "%s at $%s to $%s a month" % (who, format(int(lo), ","), format(int(hi), ","))
+    if lo is not None:
+        return "%s at $%s+ a month" % (who, format(int(lo), ","))
+    if hi is not None:
+        return "%s under $%s a month" % (who, format(int(hi), ","))
+    return who if srcs else ""
+
+
+def sheet_pool(touched, want, cfg=None, turned=()):
     """People in the lead sheet nobody has taken yet (empty Sender in LinkedIn
     Outreach, or founders on the Leads tab not in it), as Find more
     candidates. When one is added, the sheet sync fills their Sender with this
-    device's code, so the other accounts see them as taken."""
+    device's code, so the other accounts see them as taken.
+
+    `cfg` is the campaign's `find.sheet` block: only rows from those sources and
+    inside that revenue band are offered. The whole free list is read, not just
+    the top of the sheet, so researched people at the bottom are reached.
+    `turned` are people Claude already turned down under the current rules;
+    they are not offered again."""
     if not (SHEET_URL and SHEET_TOKEN):
         return [], "Lead sheet: not connected on this device"
-    pool = sheet_call(params={"pool": "1"}, timeout=90).get("pool") or []
-    out = []
+    got = sheet_call(params={"pool": "1"}, timeout=90)
+    pool = got.get("pool") or []
+    srcs, lo, hi = sheet_filter(cfg)
+    if (srcs or lo is not None or hi is not None) and int(got.get("v") or 1) < 2:
+        return [], ("Lead sheet: its script is older than this sidekick and does not send revenue or source, so it "
+                    "cannot pick out %s. Paste sheet/Code.gs into the sheet's Apps Script, then Deploy > Manage "
+                    "deployments > edit > New version." % sheet_filter_text(cfg))
+    turned = set(turned or ())
+    out, skip = [], {"taken": 0, "turned": 0, "source": 0, "revenue": 0}
     for p in pool:
         key = "li:" + str(p.get("slug") or "").lower()
-        if key == "li:" or key in touched:
+        if key == "li:":
             continue
-        rev = re.sub(r"[^0-9.]", "", str(p.get("revenue") or ""))
-        rev = float(rev) if rev else None
+        if key in touched:
+            skip["taken"] += 1
+            continue
+        if key in turned:
+            skip["turned"] += 1
+            continue
+        tag = " ".join(str(p.get(k) or "") for k in ("source", "group")).lower()
+        if srcs and not any(s in tag for s in srcs):
+            skip["source"] += 1
+            continue
+        rev = money_first(p.get("revenue"))
+        if (lo is not None or hi is not None) and (rev is None or (lo is not None and rev < lo)
+                                                    or (hi is not None and rev > hi)):
+            skip["revenue"] += 1
+            continue
         pts = 9 if rev and rev >= 500 else 7
         if account_stage() == "new":
             pts = 8 if rev and 500 <= rev < 5000 else 7
         maker = str(p.get("founder") or "").strip()
-        out.append({"source": "Lead sheet", "product": p.get("company") or "", "site": p.get("website") or "",
+        src = str(p.get("source") or "").strip()
+        rev_txt = str(p.get("revenue") or "").strip()
+        if rev and not rev_txt.startswith("$"):
+            rev_txt = "$" + rev_txt
+        out.append({"source": "Lead sheet (%s)" % src[:40] if src else "Lead sheet",
+                    "product": p.get("company") or "", "site": p.get("website") or "",
                     "tagline": str(p.get("description") or "")[:200], "maker": maker, "first": maker.split(" ")[0] if maker else "",
-                    "headline": " · ".join(x for x in (str(p.get("role") or ""), ("revenue $%s %s" % (p.get("revenue"), p.get("revenue_metric") or "")).strip() if rev else "") if x),
+                    "headline": " · ".join(x for x in (str(p.get("role") or ""), ("revenue %s %s" % (rev_txt, p.get("revenue_metric") or "")).strip() if rev else "") if x),
                     "linkedin": p.get("linkedin"), "category": p.get("category") or "", "launch": None, "age_days": None,
-                    "score": pts, "score_why": "from the lead sheet (%s)%s" % (p.get("from"), ", revenue on file" if rev else ""),
+                    "score": pts, "score_why": "from the lead sheet (%s%s)%s" % (p.get("from"), ", " + src if src else "",
+                                                                                ", revenue on file" if rev else ""),
                     "tier": "Contact this week" if pts >= 8 else "Next batch", "key": key,
                     "sheet_id": p.get("sheet_id") or "", "notes": str(p.get("notes") or "")[:200], "prices": [],
-                    "revenue_usd": rev})
-        if account_stage() != "new" and len(out) >= want * 2:
-            break
+                    "revenue_usd": rev, "revenue": rev_txt[:80]})
+    matched = len(out)
     out, dropped = fit_for_account(out, want * 2)
-    note = "Lead sheet: %d free, %d taken for this run" % (len(pool), min(len(out), want * 2))
+    want_txt = sheet_filter_text(cfg)
+    note = "Lead sheet: %d free, %d %s" % (len(pool), matched, ("match (%s)" % want_txt) if want_txt else "not taken")
+    if skip["turned"]:
+        note += ", %d Claude turned down before" % skip["turned"]
+    note += ", %d taken for this run" % min(len(out), want * 2)
     if account_stage() == "new":
         note += ", %d left out as too big for a new account" % dropped
     return out[:want * 2], note

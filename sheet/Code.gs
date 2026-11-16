@@ -68,22 +68,35 @@ function authed_(token) {
   return !!want && token === want;
 }
 
+// The pool answer's version. 2 = each row carries revenue, source and group,
+// so Find more can take only the people a campaign asks for (e.g. TrustMRR).
+var POOL_VERSION = 2;
+
+/* Optional column: its index, or -1 when this tab has no such header. */
+function opt_(sh, name) {
+  var head = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0].map(norm_);
+  return head.indexOf(norm_(name));
+}
+
 /* People nobody has taken: this tab with an empty Sender, then the Leads tab. */
 function pool_(sh, h, rows) {
   var out = [], seen = {};
+  var rv = opt_(sh, 'Revenue / month'), sc = opt_(sh, 'Source'), gp = opt_(sh, 'Group');
   for (var i = 0; i < rows.length; i++) {
     var s = slug_(rows[i][h.at.linkedin]);
     if (s) seen[s] = true;
     if (!s || rows[i][h.at.sender] || /stopped/i.test(rows[i][h.at.status])) continue;
     out.push({ slug: s, linkedin: rows[i][h.at.linkedin], company: rows[i][h.at.company], founder: rows[i][h.at.founder],
-      website: rows[i][h.at.website], notes: rows[i][h.at.notes], sheet_id: rows[i][h.at.lead_id], from: 'LinkedIn Outreach' });
+      website: rows[i][h.at.website], notes: rows[i][h.at.notes], sheet_id: rows[i][h.at.lead_id], from: 'LinkedIn Outreach',
+      revenue: rv >= 0 ? rows[i][rv] : '', source: sc >= 0 ? rows[i][sc] : '', group: gp >= 0 ? rows[i][gp] : '' });
   }
   var lt = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LEADS_TAB);
   if (!lt || lt.getLastRow() < 2) return out;
   var head = lt.getRange(1, 1, 1, lt.getLastColumn()).getDisplayValues()[0];
   var col = function (name) { return head.indexOf(name); };
   var c = { id: col('id'), company: col('company'), website: col('website'), desc: col('description'), name: col('contact_name'),
-    role: col('contact_role'), li: col('contact_linkedin'), rev: col('revenue_amount_usd'), metric: col('revenue_metric'), cat: col('category') };
+    role: col('contact_role'), li: col('contact_linkedin'), rev: col('revenue_amount_usd'), metric: col('revenue_metric'), cat: col('category'),
+    src: col('source') };
   if (c.li < 0) return out;
   var data = lt.getRange(2, 1, lt.getLastRow() - 1, head.length).getDisplayValues();
   for (var j = 0; j < data.length; j++) {
@@ -92,7 +105,8 @@ function pool_(sh, h, rows) {
     seen[s2] = true;
     out.push({ slug: s2, linkedin: r[c.li], company: r[c.company], founder: r[c.name], role: c.role >= 0 ? r[c.role] : '',
       website: r[c.website], description: c.desc >= 0 ? r[c.desc] : '', revenue: c.rev >= 0 ? r[c.rev] : '',
-      revenue_metric: c.metric >= 0 ? r[c.metric] : '', category: c.cat >= 0 ? r[c.cat] : '', sheet_id: r[c.id], from: 'Leads' });
+      revenue_metric: c.metric >= 0 ? r[c.metric] : '', category: c.cat >= 0 ? r[c.cat] : '', sheet_id: r[c.id], from: 'Leads',
+      source: c.src >= 0 ? r[c.src] : '' });
   }
   return out;
 }
@@ -105,8 +119,10 @@ function checkSetup() {
   var sh = tab_(), h = header_(sh), last = sh.getLastRow();
   var rows = last > 1 ? sh.getRange(2, 1, last - 1, h.width).getDisplayValues() : [];
   var free = pool_(sh, h, rows);
+  var trust = free.filter(function (p) { return /trustmrr/i.test(p.source + ' ' + p.group); }).length;
   Logger.log('OK. TOKEN is set. Tab "' + sh.getName() + '" has ' + rows.length + ' rows and every column the sidekick needs. '
-    + free.length + ' people are free to take. Now: Deploy > New deployment > Web app.');
+    + free.length + ' people are free to take, ' + trust + ' of them from TrustMRR (pool version ' + POOL_VERSION + '). '
+    + 'Now: Deploy > Manage deployments > edit > New version.');
 }
 
 function doGet(e) {
@@ -114,7 +130,7 @@ function doGet(e) {
   if (!authed_(e.parameter.token)) return out_({ error: 'wrong or missing token' });
   var sh = tab_(), h = header_(sh), last = sh.getLastRow();
   var rows = last > 1 ? sh.getRange(2, 1, last - 1, h.width).getDisplayValues() : [];
-  if (e.parameter.pool) return out_({ ok: true, pool: pool_(sh, h, rows) });
+  if (e.parameter.pool) return out_({ ok: true, v: POOL_VERSION, pool: pool_(sh, h, rows) });
   var people = [];
   for (var i = 0; i < rows.length; i++) {
     var s = slug_(rows[i][h.at.linkedin]);

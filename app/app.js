@@ -2267,7 +2267,8 @@ function openFindSheet(which) {
   let camp = camps.some(([k]) => k === LS.get('find_camp_' + ch)) ? LS.get('find_camp_' + ch) : camps[0][0];
   const campSeg = el('div', { class: 'sheet-seg' });
   const drawCamps = () => campSeg.replaceChildren(...camps.map(([k, v]) => el('button', {
-    class: k === camp ? 'on' : '', text: v.label || k, onclick: () => { camp = k; LS.set('find_camp_' + ch, k); drawCamps(); } })));
+    class: k === camp ? 'on' : '', text: v.label || k,
+    onclick: () => { camp = k; LS.set('find_camp_' + ch, k); drawCamps(); if (ch === 'linkedin') drawSrc(); } })));
   drawCamps();
   // LinkedIn: where to look. Spreadsheet = people already researched into the
   // lead sheet that no account has taken. Third-party apps = fresh launches;
@@ -2278,9 +2279,12 @@ function openFindSheet(which) {
   const drawSrc = () => {
     srcSeg.replaceChildren(...[['sheet', 'Spreadsheet'], ['apps', 'Third-party apps']].map(([k, label]) => el('button', {
       class: k === src ? 'on' : '', text: label, onclick: () => { src = k; LS.set('find_src', k); drawSrc(); } })));
+    const only = ((dm.campaigns[camp] || {}).sheet_filter || '').trim();
     srcNote.textContent = src === 'sheet'
       ? (dm.sheetOn
-        ? 'People already in the lead sheet with an empty Sender. Each one you get is marked ' + dm.sender + ' in the sheet, so the other account never gets them.'
+        ? (only ? 'Only ' + only + ' from the lead sheet, nobody taken yet and nobody Claude already turned down. '
+                : 'People already in the lead sheet with an empty Sender. ')
+          + 'Each one you get is marked ' + dm.sender + ' in the sheet, so the other account never gets them.'
         : 'This sidekick is not connected to the lead sheet yet. Run set_sheet.py on it once.')
       : 'Fresh launches from Uneed and Fazier (last 45 days). Only makers who listed their own LinkedIn, product site checked, nobody already contacted. Everyone added goes into the lead sheet as a new row marked ' + dm.sender + '.';
   };
