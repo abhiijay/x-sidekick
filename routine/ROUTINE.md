@@ -443,6 +443,11 @@ POST {base_url}/agent/job/{job_id}/leads
 
    Only keys from `candidates` are accepted. `tier` is optional (keep the
    server's unless there is a reason). `note` is shown on the phone card.
+   `drop` is only for people who do not fit. The server remembers every drop
+   and never offers that person again under the same rules. A good fit that
+   only missed the cut because `want` was reached goes in neither list: leave
+   it out, and it comes back in the next run. Say how many such fits there
+   were in `report`.
 4. `POST {base_url}/agent/job/{job_id}/done` with `{"report": "..."}`.
 
 If you cannot judge (no Opus subagent, payload broken), call `/done` with

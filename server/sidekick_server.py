@@ -1734,6 +1734,11 @@ def agent_write_leads(job, body):
 # only counts under the rules it was made under: change the campaign's rules and
 # everyone is judged again.
 FIND_DROPS_MAX = 5000
+# A fit that only missed the run's number ("below cut", "cut by the limit of
+# 10") is not turned down: it must come back next run. The first live run
+# (2026-11-16) listed 7 such fits as drops.
+ONLY_CUT = re.compile(r"below (?:the )?cut|cut by the limit|cut of \d+|over the limit|beyond (?:the )?limit|"
+                      r"limit of \d+|no room|out of room", re.I)
 
 
 def rules_sig(campaign):
@@ -1745,7 +1750,8 @@ def turned_down(campaign, acct=None):
     d = _load(FIND_DROPS_FILE, "drops")
     bucket = (d if isinstance(d, dict) else {}).get("%s|%s" % (campaign, acct or SHEET_SENDER)) or {}
     sig = rules_sig(campaign)
-    return {k for k, v in bucket.items() if isinstance(v, dict) and v.get("rules") == sig}
+    return {k for k, v in bucket.items() if isinstance(v, dict) and v.get("rules") == sig
+            and not ONLY_CUT.search(str(v.get("why") or ""))}
 
 
 def remember_turned_down(campaign, acct, drops, cand_keys):
@@ -1758,7 +1764,7 @@ def remember_turned_down(campaign, acct, drops, cand_keys):
         bucket = d.setdefault("%s|%s" % (campaign, acct or SHEET_SENDER), {})
         for x in drops:
             k = str(x.get("key") or "")
-            if k and k in cand_keys:
+            if k and k in cand_keys and not ONLY_CUT.search(str(x.get("why") or "")):
                 bucket[k] = {"why": str(x.get("why") or "")[:200], "ts": stamp, "rules": sig}
                 n += 1
         if len(bucket) > FIND_DROPS_MAX:
