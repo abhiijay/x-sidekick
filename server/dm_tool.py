@@ -348,10 +348,19 @@ def cmd_load(args):
                     report["kept"].append("%s (%s)" % (src["id"], old.get("status")))
                 continue
             key = person_key(src)
+            twin_ok = False
             if src.get("channel") == "linkedin":
                 slug, who = li_slug(src), sender_of(src)
                 had = owner.get(slug)
-                if had and sender_of(had) != who:
+                # --twin: the operator wants the same person requested from two
+                # accounts (who accepts which is unknown). Only while the other
+                # account's copy is a connect lead still waiting; the server
+                # skips the leftover copy once one account connects (twins.py).
+                twin_ok = bool(args.twin and had and sender_of(had) != who
+                               and (src.get("kind") or "message") == "connect"
+                               and (had.get("kind") or "message") == "connect"
+                               and had.get("status") in ("ready", "requested"))
+                if had and sender_of(had) != who and not twin_ok:
                     report["other"].append("%s: %s already has them as %s (%s)" % (
                         src["id"], sender_of(had), had.get("id"), had.get("status")))
                     continue
@@ -366,7 +375,7 @@ def cmd_load(args):
                 report["repeat"].append("%s: already messaged as %s on %s" % (
                     src["id"], c.get("id"), (c.get("sent_ts") or "")[:10]))
                 continue
-            if key in waiting:
+            if key in waiting and not (src.get("channel") == "linkedin" and twin_ok):
                 report["dupe"].append("%s: same person already waiting as %s" % (
                     src["id"], waiting[key].get("id")))
                 continue
@@ -554,6 +563,8 @@ def main():
     p = sub.add_parser("load")
     p.add_argument("file")
     p.add_argument("--account", help="LinkedIn account for every lead without a sender (a1, a2, ...)")
+    p.add_argument("--twin", action="store_true",
+                   help="connect leads may also go to a second account while the first has only requested them")
     p.add_argument("--free-sheet-rows", action="store_true",
                    help="leads are untaken lead-sheet rows (with sheet_id): skip the already-contacted list for them")
     p.add_argument("--allow-repeat", action="store_true")

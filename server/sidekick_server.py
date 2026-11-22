@@ -43,6 +43,9 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from twins import retire_twins  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_SIDEKICK = os.path.dirname(HERE)
 APP_DIR = os.path.join(REPO_SIDEKICK, "app")
@@ -1468,6 +1471,8 @@ def dm_update(body):
             elif new in ("skipped", "cant_dm"):
                 lead["skip_reason"] = str(body.get("reason") or "")[:200]
         lead["updated_ts"] = ts
+        if new in ("accepted", "sent", "replied"):
+            retire_twins(leads, ts)   # the same person waiting on another account
         save_dm_leads(leads)
 
         status = lead.get("status")
@@ -2588,6 +2593,7 @@ def sync_merge(incoming):
             leads[i] = inc
             changed.append(inc)
         if changed:
+            changed += retire_twins(leads, now_str())
             save_dm_leads(leads)
             for lead in changed:
                 # dm-sends.json is derived from the lead, so it follows the merge.
