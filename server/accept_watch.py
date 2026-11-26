@@ -127,10 +127,7 @@ def slugs_in(text):
     return seen
 
 
-def headline_of(msg):
-    """The accepter's name + LinkedIn headline from an "X accepted your invitation"
-    email ("Akshay Kumar Co-Founder at Adbrew | ..."), or "". Read from the HTML
-    part, where LinkedIn prints it under "has accepted your invitation"."""
+def _html_text(msg):
     for p in (msg.walk() if msg.is_multipart() else [msg]):
         if p.get_content_type() != "text/html":
             continue
@@ -140,10 +137,37 @@ def headline_of(msg):
             continue
         t = re.sub(r"<style.*?</style>|<script.*?</script>", " ", h, flags=re.S | re.I)
         t = html.unescape(re.sub(r"<[^>]+>", " ", t))
-        t = re.sub(r"[\s͏​‌ ]+", " ", t)
-        m = re.search(r"has accepted your invitation (.{3,400}?)(?: Message\b| Suggestions from| Connect\b|$)", t)
-        if m:
-            return m.group(1).strip()[:240]
+        return re.sub(r"[\s\u034f\u200b\u200c\u00a0]+", " ", t)
+    return ""
+
+
+def headlines_of(msg):
+    """["Name Headline", ...] from LinkedIn's accept emails: one for "X accepted
+    your invitation", one per person for "You have N new connections"."""
+    t = _html_text(msg)
+    m = re.search(r"has accepted your invitation (.{3,400}?)(?: Message\b| Suggestions from| Connect\b|$)", t)
+    if m:
+        return [m.group(1).strip()[:240]]
+    m = re.search(r"start a conversation (.+?)(?: This email was intended|$)", t)
+    if m:
+        return [x.strip()[:240] for x in re.split(r" Message\b", m.group(1)) if len(x.strip()) > 3]
+    return []
+
+
+def headline_of(msg):
+    h = headlines_of(msg)
+    return h[0] if h else ""
+
+
+def headline_for(headlines, name):
+    """The entry in a batch email that belongs to this person (by name)."""
+    words = [w for w in re.split(r"\s+", (name or "").strip().lower()) if w]
+    if not words:
+        return ""
+    for h in headlines or []:
+        low = h.lower()
+        if low.startswith(words[0]) and (len(words) == 1 or words[-1] in low[:60]):
+            return h
     return ""
 
 
@@ -179,7 +203,8 @@ def match(acceptances, requested):
                 r = by_slug.get(sl)
                 if r and r["id"] not in hits:
                     hits[r["id"]] = {"id": r["id"], "name": r.get("name"), "email_subject_name": None,
-                                     "email_ts": a.get("ts"), "headline": ""}   # batch email: no single headline
+                                     "email_ts": a.get("ts"),
+                                     "headline": headline_for(a.get("headlines"), r.get("name"))}
             continue
         if name:
             fw = first_word(name)
@@ -248,7 +273,8 @@ def fetch_acceptances(user, password, days=21, seen=(), timeout=30, after=None):
             a = classify(subject, text)
             checked.append(mid)
             if a and a.get("type", "accepted") == "accepted":
-                a["headline"] = headline_of(msg)
+                a["headlines"] = headlines_of(msg)
+                a["headline"] = a["headlines"][0] if a.get("strict", True) and a["headlines"] else ""
             if a and a.get("slugs"):
                 dt = email.utils.parsedate_to_datetime(head.get("Date")) if head.get("Date") else None
                 a["ts"] = dt.astimezone().strftime("%Y-%m-%d %H:%M:%S") if dt else None
