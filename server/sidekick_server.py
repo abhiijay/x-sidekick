@@ -2151,6 +2151,15 @@ def dm_connect_pause(body):
             hits = acct.setdefault("limit_hits", [])
             hits.insert(0, {"ts": now_str(), "requested_7d": sent7, "days": days})
             acct["limit_hits"] = hits[:50]
+            # Also append to a file nothing ever rewrites: presses made before
+            # 26 Nov 2026 were lost from dm-state.json, and the good-leads
+            # skill reads this to set each account's weekly number.
+            try:
+                with open(os.path.join(DATA_DIR, "limit-hits.jsonl"), "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"ts": now_str(), "account": account(), "requested_7d": sent7,
+                                        "days": days}) + "\n")
+            except OSError as e:
+                log("limit-hits.jsonl: %s" % e)
         else:
             acct.pop("connect_pause", None)
         save_dm_state(st)
