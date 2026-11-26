@@ -1849,6 +1849,11 @@ function dmMenu(l, ta) {
     acts.push(isIcp(l) ? { label: 'Move to Non-ICP', run: () => setIcp([l], 'light') }
       : { label: 'Move to ICP (a real buyer)', run: () => setIcp([l], 'founder') });
   }
+  if (l.status === 'ready' && l.headline_hold) {
+    acts.push({ label: "Checked: it's the right person, write it", run: async () => {
+      delete l.headline_hold; renderDm(l.channel);
+      try { await dmSave(l, { headline_ok: true }); } catch { /* toasted */ } } });
+  }
   if (l.status === 'ready') {
     if (typeof l.draft_text === 'string') acts.push({ label: 'Reset my edits', run: async () => { delete l.draft_text; renderDm(l.channel); try { await dmSave(l, { draft_text: null }); } catch { /* toasted */ } } });
     if (l.needs_message) acts.push({ label: 'Skip this person', run: () => dmStatus(l, 'skipped', { reason: 'skipped on phone' }, 'Skipped ' + dmWho(l), 'ready') });
@@ -1870,6 +1875,7 @@ function dmFlags(l, text) {
   const box = el('div', { class: 'dm-flags' });
   const add = (t, cls) => box.append(el('div', { class: 'flag' + (cls ? ' ' + cls : '') }, el('b', { text: '!' }), el('span', { text: t })));
   if (l.drop) add('Not advised. Read the note before sending.', 'bad');
+  if (l.headline_hold) add(l.headline_hold, 'bad');
   if (l.flag) add(l.flag);
   if (l.note) add(l.note);
   for (const w of dmRuleWarnings(l, text)) add(w, 'bad');
@@ -2154,7 +2160,8 @@ function needsCard(ch, needs) {
   const card = el('div', { class: 'card needs-card' });
   card.append(el('div', { class: 'find-title', text: needs.length + (needs.length === 1 ? ' person needs' : ' people need') + ' a message' }));
   for (const l of needs.slice(0, 30)) {
-    const why = l.accepted_ts ? 'accepted ' + agoText(l.accepted_ts) : (l.note || l.flag || l.batch || '');
+    const why = l.headline_hold ? '⚠ ' + l.headline_hold
+      : l.accepted_ts ? 'accepted ' + agoText(l.accepted_ts) : (l.note || l.flag || l.batch || '');
     card.append(el('div', { class: 'needs-row' },
       el('b', { text: dmWho(l) }), el('span', { class: 'muted', text: ' ' + [l.product, why].filter(Boolean).join(' · ') }),
       el('button', { class: 'more-btn', text: '⋯', onclick: () => dmMenu(l) })));

@@ -1054,9 +1054,11 @@ def accept_check(trigger="timer"):
             leads = load_dm_leads()
             ids = {h["id"] for h in moved}
             rids = {r["id"] for r in got_reply}
+            heads = {h["id"]: h.get("headline") or "" for h in moved}
             for l in leads:
                 if l["id"] in ids:
                     l["accepted_by"] = "email"
+                    apply_headline(l, heads.get(l["id"], ""))
                 if l["id"] in rids:
                     l["replied_by"] = "email"
             if ids or rids:
@@ -1079,6 +1081,43 @@ def accept_check(trigger="timer"):
         ACCEPT_RUN_LOCK.release()
 
 
+def company_keys(lead):
+    """Words that name this lead's company: the site's name and the product's first word."""
+    keys = set()
+    host = re.sub(r"^https?://(www\.)?", "", (lead.get("site") or "").lower()).split("/")[0]
+    if host:
+        keys.add(re.sub(r"[^a-z0-9]", "", host.split(".")[0]))
+    first = re.split(r"[\s|:,.\u2013\u2014-]+", (lead.get("product") or "").strip().lower())
+    if first and first[0]:
+        keys.add(re.sub(r"[^a-z0-9]", "", first[0]))
+    return {k for k in keys if len(k) >= 3}
+
+
+def headline_hold_reason(lead, headline):
+    """None when the accepter's LinkedIn headline names their company, else why
+    the first message should wait for a check (the site may link a namesake, or
+    the person left: s4e.io linked an Apple engineer, 26 Nov 2026)."""
+    if not headline:
+        return None                      # nothing to judge (batch email, or no headline)
+    keys = company_keys(lead)
+    if not keys:
+        return None
+    squeezed = re.sub(r"[^a-z0-9]", "", headline.lower())
+    if any(k in squeezed for k in keys):
+        return None
+    where = re.sub(r"^https?://(www\.)?", "", lead.get("site") or "").strip("/") or (lead.get("product") or "their company")
+    return "Check first: their LinkedIn headline does not name %s. It says: \"%s\"" % (where, headline[:160])
+
+
+def apply_headline(lead, headline):
+    lead["accept_headline"] = headline
+    why = headline_hold_reason(lead, headline)
+    if why:
+        lead["headline_hold"] = why
+    else:
+        lead.pop("headline_hold", None)
+
+
 def maybe_autowrite():
     """Write with Claude for LinkedIn people waiting on a message, throttled."""
     if not routine_configured():
@@ -1097,6 +1136,33 @@ def maybe_autowrite():
         st.setdefault("accept_watch", {})["last_write_ts"] = now_str()
         save_dm_state(st)
     return res.get("leads", 0)
+
+
+def headline_backfill(body):
+    """Read the last N days of acceptance emails again and give every accepted
+    person still waiting for a first message their headline check."""
+    import accept_watch
+    if not accept_configured():
+        return 400, {"error": "LI_ACCEPT_EMAIL / LI_ACCEPT_APP_PASSWORD are not set in server/.env"}
+    days = clamp_int(body.get("days"), 1, 60, 21)
+    try:
+        found, _, _ = accept_watch.fetch_acceptances(LI_ACCEPT_EMAIL, LI_ACCEPT_APP_PASSWORD, days=days)
+    except Exception as e:
+        return 502, {"error": "%s: %s" % (type(e).__name__, e)}
+    with LOCK:
+        leads = load_dm_leads()
+        waiting = [l for l in leads if l.get("channel") == "linkedin" and lead_kind(l) == "message"
+                   and l.get("status") == "ready" and lead_sender(l) == SHEET_SENDER and not l.get("accept_headline")]
+        hits = accept_watch.match(found, [{"id": l["id"], "name": l.get("name") or "",
+                                           "slug": linkedin_slug(l.get("profile_url"))} for l in waiting])
+        heads = {h["id"]: h.get("headline") or "" for h in hits}
+        held, ok = [], []
+        for l in waiting:
+            if heads.get(l["id"]):
+                apply_headline(l, heads[l["id"]])
+                (held if l.get("headline_hold") else ok).append(l.get("name"))
+        save_dm_leads(leads)
+    return 200, {"ok": True, "waiting": len(waiting), "checked": len(held) + len(ok), "held": held, "passed": ok}
 
 
 def accept_loop():
@@ -1363,6 +1429,9 @@ def dm_update(body):
                 lead.pop("pick", None)
         if isinstance(body.get("variant_index"), int):
             lead["variant_index"] = max(0, body["variant_index"])
+        if body.get("headline_ok") is True:          # checked: it is the right person
+            lead.pop("headline_hold", None)
+            lead["headline_checked_ts"] = now_str()
         # A buyer whose report is not made yet has no message. "Ask first" puts
         # the short ask-first versions on the card; turning it off waits for the PDF.
         if isinstance(body.get("use_ask"), bool) and lead.get("needs_report"):
@@ -1828,6 +1897,7 @@ def start_write_job(body):
         todo = [l for l in leads if l.get("status") == "ready" and lead_kind(l) == "message"
                 and l.get("needs_message") and l.get("writing_job") not in live and is_mine(l)
                 and (not ids or l.get("id") in ids)
+                and (ids or not l.get("headline_hold"))      # held: wait for a check unless asked by name
                 and (not body.get("channel") or l.get("channel") == body.get("channel"))]
         if not todo:
             return 400, {"error": "no one is waiting for a message"}
@@ -4794,6 +4864,8 @@ class AppHandler(BaseHandler):
                 return self._json(*dm_feedback(body))
             if path == "/api/dm/accept-check":
                 return self._json(*accept_check("phone"))
+            if path == "/api/dm/headline-backfill":
+                return self._json(*headline_backfill(body))
             if path == "/api/block":
                 with LOCK:
                     return self._json(*block_handle(body))

@@ -29,6 +29,7 @@ is what keeps those from counting.
 import email
 import email.header
 import email.utils
+import html
 import imaplib
 import re
 import urllib.parse
@@ -126,6 +127,26 @@ def slugs_in(text):
     return seen
 
 
+def headline_of(msg):
+    """The accepter's name + LinkedIn headline from an "X accepted your invitation"
+    email ("Akshay Kumar Co-Founder at Adbrew | ..."), or "". Read from the HTML
+    part, where LinkedIn prints it under "has accepted your invitation"."""
+    for p in (msg.walk() if msg.is_multipart() else [msg]):
+        if p.get_content_type() != "text/html":
+            continue
+        try:
+            h = p.get_payload(decode=True).decode(p.get_content_charset() or "utf-8", "replace")
+        except (AttributeError, LookupError):
+            continue
+        t = re.sub(r"<style.*?</style>|<script.*?</script>", " ", h, flags=re.S | re.I)
+        t = html.unescape(re.sub(r"<[^>]+>", " ", t))
+        t = re.sub(r"[\s͏​‌ ]+", " ", t)
+        m = re.search(r"has accepted your invitation (.{3,400}?)(?: Message\b| Suggestions from| Connect\b|$)", t)
+        if m:
+            return m.group(1).strip()[:240]
+    return ""
+
+
 def parse_acceptance(subject, text):
     """-> {"name", "slugs"} for an acceptance email, else None."""
     if not SUBJECT_RE.search(subject or "") and "accepted your invitation" not in (text or "").lower():
@@ -158,7 +179,7 @@ def match(acceptances, requested):
                 r = by_slug.get(sl)
                 if r and r["id"] not in hits:
                     hits[r["id"]] = {"id": r["id"], "name": r.get("name"), "email_subject_name": None,
-                                     "email_ts": a.get("ts")}
+                                     "email_ts": a.get("ts"), "headline": ""}   # batch email: no single headline
             continue
         if name:
             fw = first_word(name)
@@ -170,7 +191,7 @@ def match(acceptances, requested):
             found = by_slug[slugs[0]]
         if found and found["id"] not in hits:
             hits[found["id"]] = {"id": found["id"], "name": found.get("name"), "email_subject_name": name,
-                                 "email_ts": a.get("ts")}
+                                 "email_ts": a.get("ts"), "headline": a.get("headline") or ""}
     return list(hits.values())
 
 
@@ -226,6 +247,8 @@ def fetch_acceptances(user, password, days=21, seen=(), timeout=30, after=None):
                 text = body_text(msg)
             a = classify(subject, text)
             checked.append(mid)
+            if a and a.get("type", "accepted") == "accepted":
+                a["headline"] = headline_of(msg)
             if a and a.get("slugs"):
                 dt = email.utils.parsedate_to_datetime(head.get("Date")) if head.get("Date") else None
                 a["ts"] = dt.astimezone().strftime("%Y-%m-%d %H:%M:%S") if dt else None
